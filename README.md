@@ -1,5 +1,7 @@
 # rinexfetch
 
+[![CI](https://github.com/MrCry0/rinexfetch/actions/workflows/ci.yml/badge.svg)](https://github.com/MrCry0/rinexfetch/actions/workflows/ci.yml)
+
 RINEX fetch & combine tool.
 
 `rinexfetch` is a command-line tool that retrieves RINEX data from NASA's
@@ -135,6 +137,22 @@ summary.
   not-yet-published / network / unknown-station / parse-format) for lab
   troubleshooting.
 
+## Installation
+
+Prebuilt `.deb` (Debian/Ubuntu), `.rpm` (Fedora), and a plain `x86_64-linux-gnu`
+tarball are published on the [releases page][releases] for every tagged
+version, alongside a `SHA256SUMS` file to verify downloads against.
+
+```
+# Debian / Ubuntu
+sudo apt install ./rinexfetch_<version>-1_amd64.deb
+
+# Fedora
+sudo dnf install ./rinexfetch-<version>-1.x86_64.rpm
+```
+
+[releases]: https://github.com/MrCry0/rinexfetch/releases
+
 ## Building
 
 ```
@@ -142,6 +160,35 @@ cargo build
 cargo test
 cargo clippy
 ```
+
+### Building packages locally
+
+Packaging is driven by `[package.metadata.deb]` and
+`[package.metadata.generate-rpm]` in `Cargo.toml`, via
+[`cargo-deb`](https://lib.rs/cargo-deb) and
+[`cargo-generate-rpm`](https://lib.rs/cargo-generate-rpm). Both are pure Rust
+and don't need `dpkg-deb` or `rpmbuild` installed.
+
+```
+cargo install cargo-deb cargo-generate-rpm
+
+cargo build --release
+cargo deb --no-build            # -> target/debian/*.deb
+cargo generate-rpm              # -> target/generate-rpm/*.rpm
+```
+
+## CI & releases
+
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs
+`cargo fmt --check`, `cargo clippy`, `cargo build`, and `cargo test` on every
+push and pull request, plus a packaging smoke test that builds the `.deb` and
+`.rpm` and uploads them as workflow artifacts.
+
+Pushing a tag matching `v*.*.*` runs
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which
+verifies the tag matches the `Cargo.toml` version, re-runs the test suite,
+builds the release binary tarball, `.deb`, and `.rpm`, and publishes them to
+a GitHub release with a `SHA256SUMS` file.
 
 ## License
 
