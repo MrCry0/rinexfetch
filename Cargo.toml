@@ -4,10 +4,34 @@ version = "0.1.0"
 edition = "2024"
 description = "Fetch and combine RINEX data from NASA CDDIS for GNSS receiver lab work"
 license = "GPL-3.0-only"
-repository = "https://github.com/MrCry0/rinex-fetch"
+readme = "README.md"
+repository = "https://github.com/MrCry0/rinexfetch"
 
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
 hifitime = "4.3"
 thiserror = "2.0"
 rpassword = "7.5"
+
+[package.metadata.deb]
+maintainer = "Oleksandr Suvorov <cryosay@gmail.com>"
+copyright = "2026, Oleksandr Suvorov <cryosay@gmail.com>"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+Fetches and combines RINEX data from NASA's CDDIS archive for a given \
+time, GNSS constellation set, and set of ground stations, producing \
+standards-compliant RINEX 4.xx output for GNSS receiver development \
+lab use. Not a signal generation or RF transmission tool."""
+depends = "$auto"
+section = "science"
+priority = "optional"
+assets = [
+    ["target/release/rinexfetch", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/rinexfetch/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/rinexfetch", dest = "/usr/bin/rinexfetch", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/rinexfetch/README.md", mode = "644", doc = true },
+]
