@@ -1,0 +1,13 @@
+[package]
+name = "rinexfetch"
+version = "0.1.0"
+edition = "2024"
+description = "Fetch and combine RINEX data from NASA CDDIS for GNSS receiver lab work"
+license = "GPL-3.0-only"
+repository = "https://github.com/MrCry0/rinex-fetch"
+
+[dependencies]
+clap = { version = "4.6", features = ["derive"] }
+hifitime = "4.3"
+thiserror = "2.0"
+rpassword = "7.5"
