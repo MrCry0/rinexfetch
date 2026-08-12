@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use reqwest::StatusCode;
+use rinex::navigation::NavFrameType;
 use rinex::prelude::{Constellation, Rinex, Version};
 
 use crate::cddis::auth::CddisClient;
@@ -33,12 +34,24 @@ pub enum NavError {
     Write(#[from] rinex::prelude::FormattingError),
     #[error("downloaded product is not a navigation RINEX file")]
     UnexpectedRecordType,
+    #[error(
+        "cannot represent this nav product in RINEX 3: it contains message types with \
+         no RINEX 3 equivalent (try --rinex-version 4)"
+    )]
+    UnsupportedDownconversion,
 }
 
+#[derive(Debug)]
 pub struct NavOutcome {
     pub day: GpsDay,
     pub tier: NavTier,
     pub output_path: PathBuf,
+    /// Count of non-ephemeris nav frames (system time offset, earth
+    /// orientation, ionosphere model — all RINEX-4-only) present in the
+    /// filtered record. The `rinex` crate's nav writer only formats
+    /// ephemeris frames as of 0.22 (silently, for any target version), so
+    /// this is surfaced here rather than left undetected.
+    pub dropped_non_ephemeris: usize,
 }
 
 /// Tries each candidate in order, returning the first that downloads
@@ -50,16 +63,19 @@ pub fn fetch_and_write(
     client: &CddisClient,
     candidates: &[NavCandidate],
     systems: &[GnssSystem],
+    target_version_major: u8,
     output_dir: &Path,
 ) -> Result<NavOutcome, NavError> {
     for candidate in candidates {
         match download::download(client, &candidate.url) {
             Ok(gzip_bytes) => {
-                let output_path = write_filtered_nav(&gzip_bytes, systems, output_dir)?;
+                let (output_path, dropped_non_ephemeris) =
+                    write_filtered_nav(&gzip_bytes, systems, target_version_major, output_dir)?;
                 return Ok(NavOutcome {
                     day: candidate.day,
                     tier: candidate.tier,
                     output_path,
+                    dropped_non_ephemeris,
                 });
             }
             Err(DownloadError::Request(err)) if err.status() == Some(StatusCode::NOT_FOUND) => {
@@ -76,8 +92,9 @@ pub fn fetch_and_write(
 fn write_filtered_nav(
     gzip_bytes: &[u8],
     systems: &[GnssSystem],
+    target_version_major: u8,
     output_dir: &Path,
-) -> Result<PathBuf, NavError> {
+) -> Result<(PathBuf, usize), NavError> {
     let mut decompressed = Vec::new();
     GzDecoder::new(gzip_bytes).read_to_end(&mut decompressed)?;
 
@@ -93,15 +110,31 @@ fn write_filtered_nav(
             .any(|system| matches_constellation(*system, key.sv.constellation))
     });
 
-    if rinex.header.version.major < 4 {
-        rinex.header = rinex.header.with_version(Version::new(4, 0));
+    let dropped_non_ephemeris = nav
+        .keys()
+        .filter(|key| key.frmtype != NavFrameType::Ephemeris)
+        .count();
+
+    if rinex.header.version.major != target_version_major {
+        let target_minor = if target_version_major >= 4 { 0 } else { 5 };
+        rinex.header = rinex
+            .header
+            .with_version(Version::new(target_version_major, target_minor));
     }
 
     let filename = rinex.standard_filename(false, None, None);
     let output_path = output_dir.join(filename);
-    rinex.to_file(&output_path)?;
+    if let Err(err) = rinex.to_file(&output_path) {
+        if matches!(
+            err,
+            rinex::prelude::FormattingError::MissingNavigationStandards
+        ) {
+            return Err(NavError::UnsupportedDownconversion);
+        }
+        return Err(err.into());
+    }
 
-    Ok(output_path)
+    Ok((output_path, dropped_non_ephemeris))
 }
 
 fn matches_constellation(system: GnssSystem, constellation: Constellation) -> bool {

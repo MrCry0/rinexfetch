@@ -31,7 +31,7 @@ struct Cli {
     #[arg(long)]
     stations: Option<String>,
 
-    /// Target RINEX output version. Only 4 is currently supported.
+    /// Target RINEX output version: 3 or 4.
     #[arg(long, default_value_t = 4)]
     rinex_version: u8,
 
@@ -61,7 +61,7 @@ fn parse_stations(raw: &Option<String>) -> Vec<String> {
 }
 
 fn run(cli: Cli) -> Result<(), RinexFetchError> {
-    if cli.rinex_version != 4 {
+    if cli.rinex_version != 3 && cli.rinex_version != 4 {
         return Err(RinexFetchError::UnsupportedRinexVersion(cli.rinex_version));
     }
 
@@ -88,23 +88,39 @@ fn run(cli: Cli) -> Result<(), RinexFetchError> {
     } else {
         discovery::nav_candidates_for_day(gps_day)
     };
-    let nav_outcome = nav::fetch_and_write(&client, &candidates, &systems, &cli.output_dir)?;
+    let nav_outcome = nav::fetch_and_write(
+        &client,
+        &candidates,
+        &systems,
+        cli.rinex_version,
+        &cli.output_dir,
+    )?;
 
     println!();
     println!(
-        "Nav: wrote {} ({:?} tier, day {:04}-{:03})",
+        "Nav: wrote {} ({:?} tier, day {:04}-{:03}, RINEX {})",
         nav_outcome.output_path.display(),
         nav_outcome.tier,
         nav_outcome.day.year,
         nav_outcome.day.day_of_year,
+        cli.rinex_version,
     );
+    if nav_outcome.dropped_non_ephemeris > 0 {
+        println!(
+            "Note: {} non-ephemeris nav frame(s) (system time offset / earth \
+             orientation / ionosphere model) were present in the source but are not \
+             written to output — the rinex crate's nav writer currently only formats \
+             ephemeris frames.",
+            nav_outcome.dropped_non_ephemeris
+        );
+    }
 
     if !stations.is_empty() {
         println!();
         println!(
             "Not yet implemented: per-station obs download and RINEX writing (see \
-             rinexfetch-project-plan.md, Phase 4). This build fetches the combined nav \
-             file only (Phases 1-3)."
+             rinexfetch-project-plan.md, Phase 5). This build fetches the combined nav \
+             file only (Phases 1-4)."
         );
     }
 

@@ -6,10 +6,10 @@ RINEX fetch & combine tool for GNSS receiver development labs.
 
 `rinexfetch` is a command-line tool that retrieves RINEX data from NASA's
 CDDIS archive for a given time, GNSS constellation set, and set of ground
-stations, and produces standards-compliant RINEX 4.xx output. It is intended
-for lab use in receiver development, testing, and post-processing. It is
-**not** a signal generation or RF transmission tool — it only retrieves and
-reformats existing RINEX products.
+stations, and produces standards-compliant RINEX 3.xx or 4.xx output. It is
+intended for lab use in receiver development, testing, and post-processing.
+It is **not** a signal generation or RF transmission tool — it only
+retrieves and reformats existing RINEX products.
 
 ## Status
 
@@ -30,8 +30,8 @@ design and the phased development plan; the sections below summarize it.
   list of ground stations, for the same time and constellation filter.
 - Resolves `latest` or an explicit datetime to the corresponding GPS
   day/session and CDDIS product availability tier.
-- Outputs RINEX version 4.xx, upconverting from the source version where
-  needed.
+- Outputs RINEX version 3.xx or 4.xx (`--rinex-version`, default 4),
+  converting from the source version where needed.
 - Authenticates against CDDIS with a NASA Earthdata Login (URS) bearer
   token, sourced through a pluggable provider (interactive prompt or
   OS-native keyring in v1; remote vault backends planned for later).
@@ -56,7 +56,7 @@ design and the phased development plan; the sections below summarize it.
 rinexfetch --time latest|<ISO8601> \
            --systems all|gps,glonass,galileo,beidou,qzss,sbas \
            --stations WTZR00DEU,ONSA00SWE,... \
-           --rinex-version 4 \
+           --rinex-version 3|4 \
            --output-dir <path>
 ```
 
@@ -70,10 +70,12 @@ rinexfetch --time latest|<ISO8601> \
   identifiers, normalized internally to 9-character form. Omitted or empty
   means nav-only mode. Unknown or invalid IDs produce a per-station error
   and are skipped rather than aborting the run.
+- `--rinex-version` — `3` or `4` (default `4`); the requested output
+  version, converting from the source version where needed.
 - `--output-dir` — combined nav file plus, if applicable, one obs file per
-  successfully resolved station, all in RINEX 4.xx format. Each source
-  download is integrity-checked via gzip's own CRC32 trailer before being
-  considered valid.
+  successfully resolved station, all in the requested RINEX version. Each
+  source download is integrity-checked via gzip's own CRC32 trailer before
+  being considered valid.
 
 ## Authentication
 
@@ -126,8 +128,8 @@ remote CDDIS paths for the nav product and (if stations were given) each
 station's obs product, authenticate and download while validating content
 type before accepting a response as successful, decompress (gzip, and
 Hatanaka decompression for compact RINEX obs), parse and apply the system
-filter, write RINEX 4.xx output, and report a per-file success/failure
-summary.
+filter, write output in the requested RINEX version, and report a per-file
+success/failure summary.
 
 ## Reliability
 
