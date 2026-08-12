@@ -1,25 +1,16 @@
 //! Interactive `CredentialProvider` backend: prompts for a NASA Earthdata
-//! Login username and password (hidden) at runtime. No credentials are
-//! cached or stored anywhere by this backend.
+//! Login (URS) bearer token (hidden) at runtime. Generate one at
+//! `https://urs.earthdata.nasa.gov/users/<username>/user_tokens` (valid 60
+//! days, max 2 active at a time). No token is cached or stored anywhere by
+//! this backend.
 
-use std::io::{self, Write};
-
-use super::provider::{CredentialError, CredentialProvider, Credentials};
+use super::provider::{CredentialError, CredentialProvider};
 
 pub struct InteractiveCredentialProvider;
 
 impl CredentialProvider for InteractiveCredentialProvider {
-    fn credentials(&self) -> Result<Credentials, CredentialError> {
-        print!("NASA Earthdata Login username: ");
-        io::stdout().flush()?;
-        let mut username = String::new();
-        io::stdin().read_line(&mut username)?;
-
-        let password = rpassword::prompt_password("NASA Earthdata Login password: ")?;
-
-        Ok(Credentials {
-            username: username.trim().to_string(),
-            password,
-        })
+    fn token(&self) -> Result<String, CredentialError> {
+        let token = rpassword::prompt_password("NASA Earthdata Login (URS) bearer token: ")?;
+        Ok(token.trim().to_string())
     }
 }
