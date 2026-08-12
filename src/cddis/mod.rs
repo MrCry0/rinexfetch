@@ -7,8 +7,8 @@
 pub mod auth;
 
 /// Resolves remote CDDIS paths for nav & obs products, including the
-/// `--time now` fallback tiers (final / rapid / ultra-rapid). Phase 3. Not
-/// yet implemented.
+/// `--time latest` fallback tiers (final / rapid). Phase 3. Not yet
+/// implemented.
 pub mod discovery;
 
 /// Downloads a CDDIS product and validates the response, with content-type
