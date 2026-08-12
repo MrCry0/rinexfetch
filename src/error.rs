@@ -7,6 +7,7 @@
 //! error types convert into this one via `#[from]` as each phase lands.
 
 use crate::cddis::auth::CddisAuthError;
+use crate::rinex_merge::nav::NavError;
 use crate::secrets::CredentialError;
 use crate::time::TimeError;
 
@@ -18,6 +19,9 @@ pub enum RinexFetchError {
     #[error("unsupported --rinex-version {0}: only RINEX 4 output is supported")]
     UnsupportedRinexVersion(u8),
 
+    #[error("failed to prepare output directory: {0}")]
+    OutputDir(#[source] std::io::Error),
+
     #[error(transparent)]
     Time(#[from] TimeError),
 
@@ -26,4 +30,7 @@ pub enum RinexFetchError {
 
     #[error(transparent)]
     Auth(#[from] CddisAuthError),
+
+    #[error(transparent)]
+    Nav(#[from] NavError),
 }

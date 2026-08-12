@@ -13,7 +13,11 @@ reformats existing RINEX products.
 
 ## Status
 
-Pre-alpha, under active development. See
+Pre-alpha, under active development. The combined nav pipeline (auth,
+`--time latest`/explicit-date resolution, product discovery with
+final/rapid fallback, download, filtering, RINEX 4 output) works
+end-to-end; per-station obs fetching (`--stations`) is accepted on the
+command line but not yet implemented. See
 [`rinexfetch-project-plan.md`](rinexfetch-project-plan.md) for the full
 design and the phased development plan; the sections below summarize it.
 
@@ -46,7 +50,7 @@ design and the phased development plan; the sections below summarize it.
 - No automatic "world = full IGS/MGEX network" obs mode in v1 — an empty
   station list means nav-only, no obs files are fetched.
 
-## Usage (planned)
+## Usage
 
 ```
 rinexfetch --time latest|<ISO8601> \
