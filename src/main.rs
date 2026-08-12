@@ -65,20 +65,14 @@ fn run(cli: Cli) -> Result<(), RinexFetchError> {
     let systems = systems::parse_systems(&cli.systems).map_err(RinexFetchError::InvalidSystems)?;
     let stations = parse_stations(&cli.stations);
 
-    let credentials = match cli.credential_provider {
-        CredentialBackend::Interactive => InteractiveCredentialProvider.credentials()?,
+    let token = match cli.credential_provider {
+        CredentialBackend::Interactive => InteractiveCredentialProvider.token()?,
         CredentialBackend::Keyring => {
             return Err(RinexFetchError::CredentialBackendNotImplemented("keyring"));
         }
     };
 
-    print_summary(
-        &gps_day,
-        &systems,
-        &stations,
-        &cli.output_dir,
-        &credentials.username,
-    );
+    print_summary(&gps_day, &systems, &stations, &cli.output_dir, &token);
 
     println!();
     println!(
@@ -95,7 +89,7 @@ fn print_summary(
     systems: &[GnssSystem],
     stations: &[String],
     output_dir: &Path,
-    username: &str,
+    token: &str,
 ) {
     println!(
         "Resolved day: {:04}-{:03} (GPS week {}, day {} of GPS week)",
@@ -112,7 +106,10 @@ fn print_summary(
     }
 
     println!("Output directory: {}", output_dir.display());
-    println!("Authenticated as: {username} (credentials held in memory only)");
+    println!(
+        "Bearer token acquired ({} chars, held in memory only)",
+        token.len()
+    );
 }
 
 fn main() -> ExitCode {

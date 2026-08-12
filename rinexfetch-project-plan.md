@@ -71,30 +71,47 @@ synthesis is explicitly out of scope for this tool.
 
 ## 5. Authentication
 
-CDDIS requires a NASA Earthdata Login (URS) account. Access flow:
+CDDIS requires a NASA Earthdata Login (URS) account, and its archive access
+control is an OAuth2 flow. This was confirmed empirically against the live
+archive rather than assumed from documentation:
 
-1. Basic Auth credential exchange against `urs.earthdata.nasa.gov`.
-2. Cookie-jar-based redirect handling through to the actual file host,
-   `cddis.nasa.gov`.
-3. **Failure detection is non-trivial**: a failed login does not return an
-   HTTP error status — it returns an HTML login page in place of the
-   requested file. The download path must validate that retrieved content is
-   actually gzip/RINEX before treating a request as successful.
+- An unauthenticated `GET` on a protected file returns `302 Found` with
+  `Location: https://urs.earthdata.nasa.gov/oauth/authorize?...` — CDDIS's
+  browser-facing login redirect.
+- The same request with an `Authorization: Bearer <token>` header, using a
+  URS user token generated at
+  `urs.earthdata.nasa.gov/users/<username>/user_tokens`, is served the file
+  directly with no further exchange.
+- A `HEAD` request bypasses this check entirely on at least some paths
+  (returns `200` with or without a token) — an archive quirk, not something
+  to rely on. All auth verification must use `GET`.
+
+Because a token is sufficient and is trivial to attach (a single header, no
+session state), v1 authenticates with a URS bearer token only. It does not
+implement the full OAuth authorization-code exchange (Basic Auth against
+`urs.earthdata.nasa.gov` + cookie-jar redirect handling) that would be needed
+to turn a username/password into a session — that exchange is deferred (see
+§12) since a token is both sufficient and far cheaper to implement correctly.
+
+The download path still validates that retrieved content is actually
+gzip/RINEX before treating a request as successful, as defense in depth: the
+redirect-based failure above is easy to detect on status/`Location` alone,
+but this guards against any other unexpected response shape.
 
 ## 6. Secrets Management
 
 ### 6.1 Design
-A `CredentialProvider` trait abstracts credential retrieval, with concrete
+A `CredentialProvider` trait abstracts token retrieval, with concrete
 backends selected by configuration or CLI flag. This allows new backends to
 be added without touching the CDDIS auth logic.
 
 ### 6.2 v1 backends
-- **Interactive** — prompt for Earthdata username/password at runtime
-  (no echo).
+- **Interactive** — prompt for a URS bearer token at runtime (no echo).
 - **OS-native keyring** — Linux Secret Service, macOS Keychain, Windows
-  Credential Manager, via a cross-platform keyring library. Falls back to
-  interactive prompt (with optional save-to-keyring) if no stored credential
-  is found.
+  Credential Manager, via a cross-platform keyring library, storing the
+  token. Falls back to interactive prompt (with optional save-to-keyring) if
+  no stored token is found. Note tokens expire after 60 days, so a stored
+  token can go stale between runs.
 
 ### 6.3 Future backends (not in v1, same trait)
 - HashiCorp Vault
@@ -110,7 +127,7 @@ rinexfetch/
 │   ├── main.rs              CLI entry point, argument parsing
 │   ├── time.rs               now/yesterday/datetime → GPS day/session resolution
 │   ├── cddis/
-│   │   ├── auth.rs           Earthdata Login flow, cookie-jar redirect handling
+│   │   ├── auth.rs           URS bearer-token auth (Authorization header)
 │   │   ├── discovery.rs      Resolve remote paths for nav & obs products
 │   │   └── download.rs       Retrying, resumable, checksum-verified downloads
 │   ├── secrets/
@@ -128,11 +145,11 @@ rinexfetch/
 ### 7.1 Data flow
 1. Parse CLI arguments.
 2. Resolve time input to GPS day/session and CDDIS product tier.
-3. Resolve credentials via the configured `CredentialProvider`.
+3. Resolve a bearer token via the configured `CredentialProvider`.
 4. Discover remote paths for the combined nav product and (if stations given)
    each station's obs product.
-5. Authenticate and download, validating content type before accepting a
-   response as successful.
+5. Download with the token attached as an `Authorization` header, validating
+   content type before accepting a response as successful.
 6. Decompress (gzip, and Hatanaka decompression for compact RINEX obs).
 7. Parse, apply system filter, and write RINEX 4.xx output.
 8. Report per-file success/failure summary.
@@ -144,8 +161,10 @@ rinexfetch/
   attempts the final product first, then falls back to rapid, then
   ultra-rapid products, clearly labeling the output with which tier was
   actually used rather than silently serving stale or incomplete data.
-- **Auth failure detection**: validated by content-type/magic-byte check, not
-  HTTP status alone (see §5).
+- **Auth failure detection**: an unauthenticated/invalid-token request is
+  caught by the `302`-to-`urs.earthdata.nasa.gov` redirect (see §5); content
+  type/magic-byte checking is kept as a secondary guard, not the primary
+  signal.
 - **Per-station isolation**: a failure or unknown ID for one station does not
   abort nav retrieval or other stations' obs retrieval.
 - **Checksum verification** on all downloaded files where CDDIS publishes
@@ -161,7 +180,7 @@ rinexfetch/
 |---|---|
 | RINEX 2/3/4 parsing & writing | `rinex` |
 | GNSS/GPS time handling | `hifitime` |
-| HTTP client with cookie jar | `reqwest` |
+| HTTP client | `reqwest` |
 | OS-native credential storage | `keyring` |
 | Interactive credential prompt | `rpassword` / `dialoguer` |
 | CLI argument parsing | `clap` |
@@ -187,9 +206,10 @@ rinexfetch --time now|yesterday|<ISO8601> \
 - `CredentialProvider` trait plus interactive backend.
 
 ### Phase 2 — CDDIS Authentication
-- Earthdata Login flow implementation.
-- Content-validation logic to reliably distinguish successful downloads from
-  silent login-page failures.
+- URS bearer-token auth: attach `Authorization: Bearer <token>` to CDDIS
+  requests (`reqwest`, no cookie jar needed).
+- Redirect/status-based auth-failure detection, plus content-type validation
+  as a secondary guard against unexpected response shapes.
 - OS-native keyring backend, including save-on-first-successful-auth flow.
 
 ### Phase 3 — Nav Pipeline (end-to-end path 1)
@@ -226,3 +246,11 @@ rinexfetch --time now|yesterday|<ISO8601> \
   scope requires an explicit station list for any obs retrieval.
 - RINEX version auto-upconversion edge cases (2.11 → 4.xx obs-type mapping)
   to be validated against real CDDIS station data during Phase 4.
+- Username/password authentication via the full URS OAuth authorization-code
+  exchange (Basic Auth + cookie-jar redirect handling) — deferred past v1;
+  a bearer token is sufficient and much cheaper to implement correctly, and
+  generating one is a one-time manual step at
+  `urs.earthdata.nasa.gov/users/<username>/user_tokens`.
+- URS tokens expire after 60 days. v1 surfaces an expired/invalid token as a
+  clear auth error (via the `302`-redirect check) rather than auto-renewing;
+  automatic renewal would require the OAuth exchange above.

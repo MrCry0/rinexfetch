@@ -9,4 +9,4 @@ pub mod interactive;
 /// Phase 2 of the project plan; not yet implemented.
 pub mod keyring;
 
-pub use provider::{CredentialError, CredentialProvider, Credentials};
+pub use provider::{CredentialError, CredentialProvider};

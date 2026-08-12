@@ -28,9 +28,9 @@ design and the phased development plan; the sections below summarize it.
   GPS day/session and CDDIS product availability tier.
 - Outputs RINEX version 4.xx, upconverting from the source version where
   needed.
-- Authenticates against CDDIS via NASA Earthdata Login, with credentials
-  sourced through a pluggable provider (interactive prompt or OS-native
-  keyring in v1; remote vault backends planned for later).
+- Authenticates against CDDIS with a NASA Earthdata Login (URS) bearer
+  token, sourced through a pluggable provider (interactive prompt or
+  OS-native keyring in v1; remote vault backends planned for later).
 - Detects and clearly reports authentication failures, missing products,
   unknown stations, and network errors, rather than silently producing
   empty or wrong output.
@@ -73,14 +73,16 @@ rinexfetch --time now|yesterday|<ISO8601> \
 
 ## Authentication
 
-CDDIS requires a NASA Earthdata Login (URS) account. `rinexfetch` performs
-Basic Auth against `urs.earthdata.nasa.gov` and follows the cookie-jar-based
-redirect chain through to `cddis.nasa.gov`. A failed login does not return an
-HTTP error status — it returns an HTML login page in place of the requested
-file — so the download path validates that retrieved content is actually
-gzip/RINEX before treating a request as successful.
+CDDIS requires a NASA Earthdata Login (URS) account. `rinexfetch`
+authenticates with a URS bearer token, attached as an `Authorization`
+header — no username/password exchange or cookie jar involved. Generate a
+token at `urs.earthdata.nasa.gov/users/<username>/user_tokens` (valid 60
+days, up to 2 active at once). An unauthenticated or invalid-token request
+gets a `302` redirect to `urs.earthdata.nasa.gov` instead of the file, which
+the download path treats as an auth failure; content-type/magic-byte
+validation on the response is kept as a secondary guard.
 
-Credentials are sourced through a `CredentialProvider` abstraction so new
+The token is sourced through a `CredentialProvider` abstraction so new
 backends can be added without touching the CDDIS auth logic:
 
 - **v1**: interactive prompt (no echo), or an OS-native keyring (Linux
@@ -99,7 +101,7 @@ rinexfetch/
 │   ├── main.rs              CLI entry point, argument parsing
 │   ├── time.rs               now/yesterday/datetime → GPS day/session resolution
 │   ├── cddis/
-│   │   ├── auth.rs           Earthdata Login flow, cookie-jar redirect handling
+│   │   ├── auth.rs           URS bearer-token auth (Authorization header)
 │   │   ├── discovery.rs      Resolve remote paths for nav & obs products
 │   │   └── download.rs       Retrying, resumable, checksum-verified downloads
 │   ├── secrets/
