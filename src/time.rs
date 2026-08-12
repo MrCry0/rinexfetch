@@ -1,12 +1,12 @@
-//! `now` / `yesterday` / explicit-datetime resolution to a GPS day.
+//! `latest` / explicit-datetime resolution to a GPS day.
 //!
 //! Only day-level resolution is implemented here (Phase 1 of the project
-//! plan). CDDIS product-tier fallback (final / rapid / ultra-rapid for
-//! `--time now`) and any sub-day session refinement happen later, during
-//! path discovery (Phase 3), since they depend on what CDDIS actually has
-//! published rather than on the input time alone.
+//! plan). CDDIS product-tier fallback (final / rapid for `--time latest`)
+//! and any sub-day session refinement happen later, during path discovery
+//! (Phase 3), since they depend on what CDDIS actually has published
+//! rather than on the input time alone.
 
-use hifitime::{Epoch, HifitimeError, NANOSECONDS_PER_DAY, TimeScale, TimeUnits};
+use hifitime::{Epoch, HifitimeError, NANOSECONDS_PER_DAY, TimeScale};
 use std::str::FromStr;
 
 #[derive(Debug, thiserror::Error)]
@@ -38,15 +38,13 @@ pub struct GpsDay {
 }
 
 impl GpsDay {
-    /// Resolves `"now"`, `"yesterday"`, or an explicit ISO 8601 timestamp to
-    /// the UTC calendar day it falls on.
+    /// Resolves `"latest"` or an explicit ISO 8601 timestamp to the UTC
+    /// calendar day it falls on. `"latest"` anchors to today; discovery
+    /// (Phase 3) walks backward from there to the most recent day that
+    /// actually has a published product.
     pub fn resolve(time_arg: &str) -> Result<Self, TimeError> {
         let epoch = match time_arg {
-            "now" => Epoch::now().map_err(TimeError::SystemClock)?,
-            "yesterday" => {
-                let now = Epoch::now().map_err(TimeError::SystemClock)?;
-                now - 1_i64.days()
-            }
+            "latest" => Epoch::now().map_err(TimeError::SystemClock)?,
             explicit => {
                 Epoch::from_str(explicit).map_err(|source| TimeError::InvalidTimestamp {
                     value: explicit.to_string(),
@@ -107,10 +105,13 @@ mod tests {
     }
 
     #[test]
-    fn now_and_yesterday_are_exactly_one_day_apart() {
-        let now = GpsDay::resolve("now").unwrap();
-        let yesterday = GpsDay::resolve("yesterday").unwrap();
-        assert_eq!(now.date_utc - yesterday.date_utc, 1_i64.days());
+    fn latest_resolves_to_todays_utc_midnight() {
+        let latest = GpsDay::resolve("latest").unwrap();
+        let (year, month, day, ..) = Epoch::now().unwrap().to_gregorian_utc();
+        assert_eq!(
+            latest.date_utc,
+            Epoch::from_gregorian_utc_at_midnight(year, month, day)
+        );
     }
 
     #[test]

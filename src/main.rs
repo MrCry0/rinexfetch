@@ -16,7 +16,7 @@ use rinexfetch::time::GpsDay;
 #[derive(Debug, Parser)]
 #[command(name = "rinexfetch", version, about)]
 struct Cli {
-    /// `now`, `yesterday`, or an explicit ISO 8601 timestamp.
+    /// `latest` or an explicit ISO 8601 timestamp.
     #[arg(long)]
     time: String,
 

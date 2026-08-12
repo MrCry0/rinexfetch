@@ -16,8 +16,8 @@ synthesis is explicitly out of scope for this tool.
   (GPS / GLONASS / Galileo / BeiDou / QZSS / SBAS / all).
 - Optionally fetch **per-station observation (obs) files** for an explicit
   list of ground stations, for the same time and constellation filter.
-- Support time selection as `now`, `yesterday`, or an explicit datetime,
-  correctly resolved to the corresponding GPS day/session and CDDIS product
+- Support time selection as `latest` or an explicit datetime, correctly
+  resolved to the corresponding GPS day/session and CDDIS product
   availability tier.
 - Output RINEX version 4.xx (upconverting from source version where needed).
 - Authenticate against CDDIS via NASA Earthdata Login, with credentials
@@ -42,10 +42,8 @@ synthesis is explicitly out of scope for this tool.
 ## 4. Functional Requirements
 
 ### 4.1 Time selection
-- `--time now` — resolves to the most recent time for which a usable nav
-  product exists (see §6.3 fallback tiers).
-- `--time yesterday` — resolves to the previous UTC day's final combined
-  product.
+- `--time latest` — resolves to the most recent time for which a usable
+  nav product exists (see §8 fallback tiers).
 - `--time <ISO8601>` — resolves to the corresponding GPS day/session.
 
 ### 4.2 System selection
@@ -66,8 +64,10 @@ synthesis is explicitly out of scope for this tool.
 ### 4.4 Output
 - `--output-dir <path>` — combined nav file plus, if applicable, one obs file
   per successfully resolved station, all in RINEX 4.xx format.
-- Each output file is checksum-verified against its source before being
-  considered valid.
+- Each output file's source download is integrity-checked before being
+  considered valid: gzip's own CRC32 trailer, validated on decompression
+  (CDDIS doesn't publish a separate checksum sidecar for these files; see
+  §8).
 
 ## 5. Authentication
 
@@ -125,11 +125,11 @@ be added without touching the CDDIS auth logic.
 rinexfetch/
 ├── src/
 │   ├── main.rs              CLI entry point, argument parsing
-│   ├── time.rs               now/yesterday/datetime → GPS day/session resolution
+│   ├── time.rs               latest/datetime → GPS day/session resolution
 │   ├── cddis/
 │   │   ├── auth.rs           URS bearer-token auth (Authorization header)
 │   │   ├── discovery.rs      Resolve remote paths for nav & obs products
-│   │   └── download.rs       Retrying, resumable, checksum-verified downloads
+│   │   └── download.rs       Retrying, resumable downloads with gzip-integrity checks
 │   ├── secrets/
 │   │   ├── provider.rs       CredentialProvider trait
 │   │   ├── interactive.rs    Interactive prompt backend
@@ -156,11 +156,20 @@ rinexfetch/
 
 ## 8. Reliability Considerations
 
-- **`now` fallback tiers**: CDDIS's final combined nav product typically
-  publishes with a delay of hours to about a day. For `--time now`, the tool
-  attempts the final product first, then falls back to rapid, then
-  ultra-rapid products, clearly labeling the output with which tier was
-  actually used rather than silently serving stale or incomplete data.
+- **`latest` fallback tiers**: two real tiers exist for the combined
+  multi-GNSS broadcast nav product, not three — "final/rapid/ultra-rapid"
+  is IGS orbit/clock-product terminology that doesn't apply to broadcast
+  nav. Confirmed against the live archive by comparing `Last-Modified`
+  timestamps for a settled day: `BRDC00IGS_R_YYYYDDD0000_01D_MN.rnx.gz`
+  (IGS-combined, "final") publishes ~9h after day close;
+  `BRD400DLR_S_YYYYDDD0000_01D_MN.rnx.gz` (DLR real-time-stream combined,
+  "rapid", already RINEX 4 so no upconversion needed) publishes ~3h after
+  day close, roughly 6h earlier. `--time latest` tries final, then falls
+  back to rapid, clearly labeling the output with which tier was actually
+  used rather than silently serving stale or incomplete data. No lower-latency
+  *combined* product exists to serve as a third tier — the only faster
+  CDDIS nav data is per-station 15-minute component files, not a combined
+  product, and out of scope.
 - **Auth failure detection**: an unauthenticated/invalid-token request is
   caught by the `302`-to-`urs.earthdata.nasa.gov` redirect (see §5); content
   type/magic-byte checking is kept as a secondary guard, not the primary
@@ -191,7 +200,7 @@ rinexfetch/
 ## 10. CLI Usage (proposed)
 
 ```
-rinexfetch --time now|yesterday|<ISO8601> \
+rinexfetch --time latest|<ISO8601> \
            --systems all|gps,glonass,galileo,beidou,qzss,sbas \
            --stations WTZR00DEU,ONSA00SWE,... \
            --rinex-version 4 \
@@ -202,7 +211,7 @@ rinexfetch --time now|yesterday|<ISO8601> \
 
 ### Phase 1 — Foundations
 - Cargo project scaffold, module skeleton, CLI argument parsing.
-- Time resolution logic (`now` / `yesterday` / datetime → GPS day/session).
+- Time resolution logic (`latest` / datetime → GPS day/session).
 - `CredentialProvider` trait plus interactive backend.
 
 ### Phase 2 — CDDIS Authentication
@@ -214,8 +223,10 @@ rinexfetch --time now|yesterday|<ISO8601> \
 
 ### Phase 3 — Nav Pipeline (end-to-end path 1)
 - CDDIS path discovery for the combined broadcast nav product, including
-  fallback tiers (final / rapid / ultra-rapid).
-- Download, checksum verification, decompression.
+  the final/rapid fallback tiers (see §8).
+- Download, decompression; gzip's own CRC32 trailer (validated on
+  decompression) serves as download-integrity verification, since CDDIS
+  doesn't publish a separate checksum sidecar for these files.
 - Parse via the `rinex` crate, apply system filter, write RINEX 4.xx nav
   output.
 

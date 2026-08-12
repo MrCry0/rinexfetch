@@ -24,8 +24,8 @@ design and the phased development plan; the sections below summarize it.
   (GPS / GLONASS / Galileo / BeiDou / QZSS / SBAS / all).
 - Optionally fetches per-station **observation (obs)** files for an explicit
   list of ground stations, for the same time and constellation filter.
-- Resolves `now`, `yesterday`, or an explicit datetime to the corresponding
-  GPS day/session and CDDIS product availability tier.
+- Resolves `latest` or an explicit datetime to the corresponding GPS
+  day/session and CDDIS product availability tier.
 - Outputs RINEX version 4.xx, upconverting from the source version where
   needed.
 - Authenticates against CDDIS with a NASA Earthdata Login (URS) bearer
@@ -49,17 +49,16 @@ design and the phased development plan; the sections below summarize it.
 ## Usage (planned)
 
 ```
-rinexfetch --time now|yesterday|<ISO8601> \
+rinexfetch --time latest|<ISO8601> \
            --systems all|gps,glonass,galileo,beidou,qzss,sbas \
            --stations WTZR00DEU,ONSA00SWE,... \
            --rinex-version 4 \
            --output-dir <path>
 ```
 
-- `--time` — `now` resolves to the most recent time for which a usable nav
-  product exists (final, falling back to rapid, then ultra-rapid); `yesterday`
-  resolves to the previous UTC day's final combined product; an ISO 8601
-  timestamp resolves to its corresponding GPS day/session.
+- `--time` — `latest` resolves to the most recent time for which a usable
+  nav product exists (final, falling back to rapid); an ISO 8601 timestamp
+  resolves to its corresponding GPS day/session.
 - `--systems` — `all` or a comma-separated subset of `gps`, `glonass`,
   `galileo`, `beidou`, `qzss`, `sbas`; applied as a filter on both the
   combined nav file and any station obs files.
@@ -68,8 +67,9 @@ rinexfetch --time now|yesterday|<ISO8601> \
   means nav-only mode. Unknown or invalid IDs produce a per-station error
   and are skipped rather than aborting the run.
 - `--output-dir` — combined nav file plus, if applicable, one obs file per
-  successfully resolved station, all in RINEX 4.xx format. Each output file
-  is checksum-verified against its source before being considered valid.
+  successfully resolved station, all in RINEX 4.xx format. Each source
+  download is integrity-checked via gzip's own CRC32 trailer before being
+  considered valid.
 
 ## Authentication
 
@@ -99,11 +99,11 @@ backends can be added without touching the CDDIS auth logic:
 rinexfetch/
 ├── src/
 │   ├── main.rs              CLI entry point, argument parsing
-│   ├── time.rs               now/yesterday/datetime → GPS day/session resolution
+│   ├── time.rs               latest/datetime → GPS day/session resolution
 │   ├── cddis/
 │   │   ├── auth.rs           URS bearer-token auth (Authorization header)
 │   │   ├── discovery.rs      Resolve remote paths for nav & obs products
-│   │   └── download.rs       Retrying, resumable, checksum-verified downloads
+│   │   └── download.rs       Retrying, resumable downloads with gzip-integrity checks
 │   ├── secrets/
 │   │   ├── provider.rs       CredentialProvider trait
 │   │   ├── interactive.rs    Interactive prompt backend
@@ -127,14 +127,16 @@ summary.
 
 ## Reliability
 
-- **`now` fallback tiers**: the final combined nav product typically
-  publishes hours to about a day late. `--time now` tries final, then rapid,
-  then ultra-rapid products, and labels output with which tier was actually
-  used rather than silently serving stale or incomplete data.
+- **`latest` fallback tiers**: the final combined nav product (`BRDC00IGS`)
+  publishes ~9h after day close; `--time latest` falls back to the DLR
+  real-time-stream product (`BRD400DLR`, ~3h after day close) when final
+  isn't available yet, and labels output with which tier was actually used
+  rather than silently serving stale or incomplete data.
 - **Per-station isolation**: a failure or unknown ID for one station does
   not abort nav retrieval or other stations' obs retrieval.
-- **Checksum verification** on all downloaded files where CDDIS publishes
-  one, plus retries with backoff on transient network failures.
+- **Download integrity** via gzip's own CRC32 trailer, validated on
+  decompression (CDDIS doesn't publish a separate checksum sidecar for
+  these files), plus retries with backoff on transient network failures.
 - **Structured logging** distinguishing failure classes (auth /
   not-yet-published / network / unknown-station / parse-format) for lab
   troubleshooting.
