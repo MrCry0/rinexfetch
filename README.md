@@ -1,6 +1,6 @@
 # rinexfetch
 
-[![CI](https://github.com/MrCry0/rinex-fetch/actions/workflows/ci.yml/badge.svg)](https://github.com/MrCry0/rinex-fetch/actions/workflows/ci.yml)
+[![CI](https://github.com/MrCry0/rinexfetch/actions/workflows/ci.yml/badge.svg)](https://github.com/MrCry0/rinexfetch/actions/workflows/ci.yml)
 
 RINEX fetch & combine tool for GNSS receiver development labs.
 
@@ -151,7 +151,7 @@ sudo apt install ./rinexfetch_<version>-1_amd64.deb
 sudo dnf install ./rinexfetch-<version>-1.x86_64.rpm
 ```
 
-[releases]: https://github.com/MrCry0/rinex-fetch/releases
+[releases]: https://github.com/MrCry0/rinexfetch/releases
 
 ## Building
 
