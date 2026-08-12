@@ -6,7 +6,7 @@ use clap::{Parser, ValueEnum};
 use rinexfetch::cddis::auth::CddisClient;
 use rinexfetch::cddis::discovery;
 use rinexfetch::error::RinexFetchError;
-use rinexfetch::rinex_merge::nav;
+use rinexfetch::rinex_merge::{nav, obs};
 use rinexfetch::secrets::CredentialProvider;
 use rinexfetch::secrets::interactive::InteractiveCredentialProvider;
 use rinexfetch::secrets::keyring::KeyringCredentialProvider;
@@ -117,11 +117,28 @@ fn run(cli: Cli) -> Result<(), RinexFetchError> {
 
     if !stations.is_empty() {
         println!();
-        println!(
-            "Not yet implemented: per-station obs download and RINEX writing (see \
-             rinexfetch-project-plan.md, Phase 5). This build fetches the combined nav \
-             file only (Phases 1-4)."
+        let outcomes = obs::fetch_and_write_all(
+            &client,
+            nav_outcome.day,
+            &stations,
+            &systems,
+            cli.rinex_version,
+            &cli.output_dir,
         );
+        let failed = outcomes.iter().filter(|o| o.result.is_err()).count();
+        for outcome in &outcomes {
+            match &outcome.result {
+                Ok(path) => println!("Obs [{}]: wrote {}", outcome.station, path.display()),
+                Err(err) => println!("Obs [{}]: FAILED — {err}", outcome.station),
+            }
+        }
+        if failed > 0 {
+            println!(
+                "{failed} of {} station(s) failed; see above (each is isolated and doesn't \
+                 affect the others or the nav fetch).",
+                outcomes.len()
+            );
+        }
     }
 
     Ok(())

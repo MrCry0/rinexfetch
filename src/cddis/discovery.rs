@@ -1,8 +1,11 @@
 //! Resolves remote CDDIS paths for the combined broadcast nav product and
 //! per-station obs products, including the `--time latest` product-tier
-//! fallback (final, then rapid).
+//! fallback (final, then rapid) for nav.
 //!
-//! Obs product discovery is Phase 4.
+//! Obs has no tier concept: CDDIS publishes one daily file per station,
+//! straight from that station's own receiver submission (`R` source flag,
+//! confirmed against the live archive), not a derived/combined product
+//! with a final-vs-rapid distinction.
 
 use crate::time::GpsDay;
 
@@ -78,6 +81,19 @@ pub fn nav_candidates_for_latest(anchor: GpsDay) -> Vec<NavCandidate> {
         .collect()
 }
 
+/// CDDIS URL for `station`'s (already-validated, 9-character) daily obs
+/// product on `day`: 30s sampling, mixed (all-constellation) observation
+/// data, Hatanaka-compressed (`Rinex::parse` decompresses this
+/// transparently — no separate step needed).
+pub fn obs_url(day: GpsDay, station: &str) -> String {
+    format!(
+        "https://cddis.nasa.gov/archive/gnss/data/daily/{year:04}/{doy:03}/{yy:02}d/{station}_R_{year:04}{doy:03}0000_01D_30S_MO.crx.gz",
+        year = day.year,
+        doy = day.day_of_year,
+        yy = day.year.rem_euclid(100),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,5 +128,14 @@ mod tests {
         assert_eq!(candidates[1].tier, NavTier::Rapid);
         assert_eq!(candidates[2].day, anchor.days_before(1));
         assert_eq!(candidates[2].tier, NavTier::Final);
+    }
+
+    #[test]
+    fn obs_url_matches_expected_convention() {
+        let day = GpsDay::resolve("2026-08-01").unwrap();
+        assert_eq!(
+            obs_url(day, "WTZR00DEU"),
+            "https://cddis.nasa.gov/archive/gnss/data/daily/2026/213/26d/WTZR00DEU_R_20262130000_01D_30S_MO.crx.gz"
+        );
     }
 }

@@ -9,12 +9,13 @@ use std::path::{Path, PathBuf};
 use flate2::read::GzDecoder;
 use reqwest::StatusCode;
 use rinex::navigation::NavFrameType;
-use rinex::prelude::{Constellation, Rinex, Version};
+use rinex::prelude::Rinex;
 
 use crate::cddis::auth::CddisClient;
 use crate::cddis::discovery::{NavCandidate, NavTier};
 use crate::cddis::download::{self, DownloadError};
-use crate::systems::GnssSystem;
+use crate::rinex_merge::convert_version;
+use crate::systems::{GnssSystem, matches_constellation};
 use crate::time::GpsDay;
 
 #[derive(Debug, thiserror::Error)]
@@ -115,12 +116,7 @@ fn write_filtered_nav(
         .filter(|key| key.frmtype != NavFrameType::Ephemeris)
         .count();
 
-    if rinex.header.version.major != target_version_major {
-        let target_minor = if target_version_major >= 4 { 0 } else { 5 };
-        rinex.header = rinex
-            .header
-            .with_version(Version::new(target_version_major, target_minor));
-    }
+    rinex.header = convert_version(rinex.header, target_version_major);
 
     let filename = rinex.standard_filename(false, None, None);
     let output_path = output_dir.join(filename);
@@ -135,39 +131,4 @@ fn write_filtered_nav(
     }
 
     Ok((output_path, dropped_non_ephemeris))
-}
-
-fn matches_constellation(system: GnssSystem, constellation: Constellation) -> bool {
-    match system {
-        GnssSystem::Gps => constellation == Constellation::GPS,
-        GnssSystem::Glonass => constellation == Constellation::Glonass,
-        GnssSystem::Galileo => constellation == Constellation::Galileo,
-        GnssSystem::Beidou => constellation == Constellation::BeiDou,
-        GnssSystem::Qzss => constellation == Constellation::QZSS,
-        GnssSystem::Sbas => constellation.is_sbas(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn gps_matches_only_gps() {
-        assert!(matches_constellation(GnssSystem::Gps, Constellation::GPS));
-        assert!(!matches_constellation(
-            GnssSystem::Gps,
-            Constellation::Glonass
-        ));
-    }
-
-    #[test]
-    fn sbas_matches_any_regional_sbas_constellation() {
-        assert!(matches_constellation(GnssSystem::Sbas, Constellation::WAAS));
-        assert!(matches_constellation(
-            GnssSystem::Sbas,
-            Constellation::EGNOS
-        ));
-        assert!(!matches_constellation(GnssSystem::Sbas, Constellation::GPS));
-    }
 }

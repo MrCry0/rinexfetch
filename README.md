@@ -13,11 +13,11 @@ retrieves and reformats existing RINEX products.
 
 ## Status
 
-Pre-alpha, under active development. The combined nav pipeline (auth,
-`--time latest`/explicit-date resolution, product discovery with
-final/rapid fallback, download, filtering, RINEX 4 output) works
-end-to-end; per-station obs fetching (`--stations`) is accepted on the
-command line but not yet implemented. See
+Pre-alpha, under active development. Both the combined nav pipeline and
+per-station obs fetching work end-to-end: auth, `--time latest`/explicit-date
+resolution, product discovery (nav's final/rapid fallback; obs has no tier
+concept), download, filtering, and RINEX 3.xx/4.xx output, with per-station
+error isolation for obs. See
 [`rinexfetch-project-plan.md`](rinexfetch-project-plan.md) for the full
 design and the phased development plan; the sections below summarize it.
 
@@ -66,10 +66,12 @@ rinexfetch --time latest|<ISO8601> \
 - `--systems` — `all` or a comma-separated subset of `gps`, `glonass`,
   `galileo`, `beidou`, `qzss`, `sbas`; applied as a filter on both the
   combined nav file and any station obs files.
-- `--stations` — legacy 4-character or modern 9-character IGS site
-  identifiers, normalized internally to 9-character form. Omitted or empty
-  means nav-only mode. Unknown or invalid IDs produce a per-station error
-  and are skipped rather than aborting the run.
+- `--stations` — modern 9-character IGS site identifiers only (e.g.
+  `WTZR00DEU`); legacy 4-character IDs aren't auto-expanded (no station
+  database lookup in v1) and produce a clear per-station error naming the
+  full ID to supply instead. Omitted or empty means nav-only mode. Unknown
+  or invalid IDs produce a per-station error and are skipped rather than
+  aborting the run.
 - `--rinex-version` — `3` or `4` (default `4`); the requested output
   version, converting from the source version where needed.
 - `--output-dir` — combined nav file plus, if applicable, one obs file per
@@ -106,6 +108,7 @@ rinexfetch/
 ├── src/
 │   ├── main.rs              CLI entry point, argument parsing
 │   ├── time.rs               latest/datetime → GPS day/session resolution
+│   ├── stations.rs           --stations validation (9-character IGS IDs)
 │   ├── cddis/
 │   │   ├── auth.rs           URS bearer-token auth (Authorization header)
 │   │   ├── discovery.rs      Resolve remote paths for nav & obs products

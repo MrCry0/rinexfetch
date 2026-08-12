@@ -56,8 +56,10 @@ for this tool.
   the output).
 
 ### 4.3 Station / region selection
-- `--stations <id,id,...>` — accepts legacy 4-character and modern
-  9-character IGS site identifiers, normalized internally to 9-character form.
+- `--stations <id,id,...>` — accepts the modern 9-character IGS site
+  identifier form (`XXXX##CCC`) only. Legacy 4-character IDs are not
+  auto-expanded (see §11 Phase 5, §12) and produce a specific per-station
+  error naming the full ID to supply instead.
 - Omitted or empty list → **nav-only mode**: no obs files are fetched, only
   the combined nav file is produced.
 - Unknown or invalid station IDs produce a per-station error and are skipped;
@@ -198,7 +200,7 @@ rinexfetch/
 | CLI argument parsing | `clap` |
 | Structured logging | `tracing` |
 | Error handling | `thiserror` / `anyhow` |
-| Compression | `flate2` (gzip), Hatanaka (CRX2RNX) decompression |
+| Compression | `flate2` (gzip); Hatanaka (CRX2RNX) via the `rinex` crate's transparent CRINEX support in `Rinex::parse`, no separate library needed |
 
 ## 10. CLI Usage (proposed)
 
@@ -262,11 +264,26 @@ rinexfetch --time latest|<ISO8601> \
   `--rinex-version`.
 
 ### Phase 5 — Obs Pipeline
-- Station ID normalization and validation.
-- CDDIS path discovery for per-station obs products.
-- Download, Hatanaka decompression, parse, system filter, write obs output
-  per station in the requested RINEX version.
-- Per-station error isolation and reporting.
+- Station ID validation: only the modern 9-character IGS form
+  (`XXXX##CCC`) is accepted. Legacy 4-character IDs are **not**
+  auto-expanded to 9 characters — the 3-letter country-code suffix isn't
+  derivable from the site code alone without an external station database,
+  which is out of scope for v1 (see §12). A 4-character ID gets a specific,
+  actionable per-station error rather than a silent guess.
+- CDDIS path discovery for per-station obs products. Confirmed against the
+  live archive: obs has no tier concept like nav's final/rapid — CDDIS
+  publishes one daily file per station, straight from that station's own
+  receiver submission (`R` source flag).
+- Download, decompress (gzip, plus Hatanaka for compact RINEX — handled
+  transparently by the `rinex` crate's parser, no separate decompression
+  step needed), parse, system filter, convert to the requested RINEX
+  version, write. Unlike nav, obs version conversion was tested in both
+  directions against real station data and did not hit the nav pipeline's
+  `MissingNavigationStandards` limitation.
+- Per-station error isolation and reporting: each station's outcome
+  (success or a specific error — invalid ID, not found/unpublished,
+  network, parse/format) is captured independently; one station's failure
+  never aborts the others or the nav fetch.
 
 ### Phase 6 — Reliability Hardening
 - Retry/backoff logic for transient network failures.
@@ -286,14 +303,25 @@ rinexfetch --time latest|<ISO8601> \
 - Scheduled/daemon execution mode — deferred past v1.
 - Full "world = all IGS/MGEX stations" obs mode — deferred past v1; current
   scope requires an explicit station list for any obs retrieval.
-- RINEX version conversion edge cases (2.11 → 3.xx/4.xx obs-type mapping)
-  to be validated against real CDDIS station data during Phase 5.
+- Obs RINEX version conversion (Phase 5) was validated against a real
+  station (`WTZR00DEU`, a settled day) in both directions and worked
+  cleanly, unlike nav's 4→3 case below — no `rinex` crate limitation hit.
+  Broader edge cases (2.11 obs-type mapping specifically, other stations'
+  receiver/firmware quirks) haven't been exhaustively tested; revisit if a
+  real station turns out to hit a similar formatting gap.
 - 4→3 nav downconversion from a RINEX-4-native source is unsupported (see
   Phase 4) due to a `rinex` crate limitation, not a rinexfetch design
   choice. Deferred past v1: either contribute a fix upstream, or implement
   nav-message reformatting ourselves if it becomes a real blocker (in
   practice it only bites when `--rinex-version 3` is requested and the
   final tier isn't published yet, so the rapid tier is the only source).
+- 4-character legacy station ID auto-expansion to the 9-character form
+  (Phase 5) is deferred past v1: the 3-letter country-code suffix isn't
+  derivable from the site code alone, and would need an external station
+  database (e.g. the IGS M3G metadata service) to resolve — a real scope
+  addition, not a quick fix. v1 requires the full 9-character ID and
+  reports a specific, actionable error for a 4-character one instead of
+  guessing.
 - Username/password authentication via the full URS OAuth authorization-code
   exchange (Basic Auth + cookie-jar redirect handling) — deferred past v1;
   a bearer token is sufficient and much cheaper to implement correctly, and

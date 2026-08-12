@@ -9,6 +9,7 @@ use std::fs;
 use rinexfetch::cddis::auth::{CddisAuthError, CddisClient};
 use rinexfetch::cddis::discovery::{self, NavTier};
 use rinexfetch::rinex_merge::nav::{self, NavError};
+use rinexfetch::rinex_merge::obs;
 use rinexfetch::systems::{ALL_SYSTEMS, GnssSystem};
 use rinexfetch::time::GpsDay;
 
@@ -118,6 +119,118 @@ fn real_rapid_nav_product_cannot_downconvert_to_rinex3() {
     // silently writing a broken or incomplete file.
     let outcome = nav::fetch_and_write(&client, &candidates, &[GnssSystem::Gps], 3, &output_dir);
     assert!(matches!(outcome, Err(NavError::UnsupportedDownconversion)));
+
+    fs::remove_dir_all(&output_dir).ok();
+}
+
+#[test]
+#[ignore = "hits the live CDDIS archive; needs RINEXFETCH_TEST_TOKEN"]
+fn real_obs_product_downloads_and_writes_for_known_station() {
+    let token = std::env::var("RINEXFETCH_TEST_TOKEN")
+        .expect("set RINEXFETCH_TEST_TOKEN to a real URS bearer token to run this test");
+    let client = CddisClient::new(token).unwrap();
+
+    let day = GpsDay::resolve("2026-08-01").unwrap();
+    let output_dir = std::env::temp_dir().join("rinexfetch-live-test-obs");
+    fs::create_dir_all(&output_dir).unwrap();
+
+    let outcomes = obs::fetch_and_write_all(
+        &client,
+        day,
+        &["WTZR00DEU".to_string()],
+        &ALL_SYSTEMS,
+        4,
+        &output_dir,
+    );
+
+    assert_eq!(outcomes.len(), 1);
+    let output_path = outcomes[0]
+        .result
+        .as_ref()
+        .expect("WTZR00DEU should have obs data for a settled day")
+        .clone();
+
+    let written = rinex::prelude::Rinex::from_file(&output_path)
+        .expect("written output should itself be valid RINEX");
+    assert_eq!(written.header.version.major, 4);
+    assert!(
+        written.record.as_obs().is_some_and(|obs| !obs.is_empty()),
+        "filtered obs record should not be empty for --systems all"
+    );
+
+    fs::remove_dir_all(&output_dir).ok();
+}
+
+#[test]
+#[ignore = "hits the live CDDIS archive; needs RINEXFETCH_TEST_TOKEN"]
+fn real_obs_unknown_station_is_isolated_from_others() {
+    let token = std::env::var("RINEXFETCH_TEST_TOKEN")
+        .expect("set RINEXFETCH_TEST_TOKEN to a real URS bearer token to run this test");
+    let client = CddisClient::new(token).unwrap();
+
+    let day = GpsDay::resolve("2026-08-01").unwrap();
+    let output_dir = std::env::temp_dir().join("rinexfetch-live-test-obs-isolation");
+    fs::create_dir_all(&output_dir).unwrap();
+
+    // A well-formed but bogus 9-character station ID mixed with a real
+    // one: the bogus one should fail in isolation (404 from CDDIS -> not
+    // found) without preventing the real station from succeeding.
+    let outcomes = obs::fetch_and_write_all(
+        &client,
+        day,
+        &["ZZZZ00ZZZ".to_string(), "WTZR00DEU".to_string()],
+        &ALL_SYSTEMS,
+        4,
+        &output_dir,
+    );
+
+    assert_eq!(outcomes.len(), 2);
+    assert!(
+        matches!(outcomes[0].result, Err(obs::ObsError::NotFound)),
+        "bogus station should fail with NotFound, got {:?}",
+        outcomes[0].result
+    );
+    assert!(
+        outcomes[1].result.is_ok(),
+        "real station should still succeed despite the other one failing: {:?}",
+        outcomes[1].result
+    );
+
+    fs::remove_dir_all(&output_dir).ok();
+}
+
+#[test]
+#[ignore = "hits the live CDDIS archive; needs RINEXFETCH_TEST_TOKEN"]
+fn real_obs_product_at_rinex3() {
+    let token = std::env::var("RINEXFETCH_TEST_TOKEN")
+        .expect("set RINEXFETCH_TEST_TOKEN to a real URS bearer token to run this test");
+    let client = CddisClient::new(token).unwrap();
+
+    let day = GpsDay::resolve("2026-08-01").unwrap();
+    let output_dir = std::env::temp_dir().join("rinexfetch-live-test-obs-v3");
+    fs::create_dir_all(&output_dir).unwrap();
+
+    let outcomes = obs::fetch_and_write_all(
+        &client,
+        day,
+        &["WTZR00DEU".to_string()],
+        &ALL_SYSTEMS,
+        3,
+        &output_dir,
+    );
+
+    assert_eq!(outcomes.len(), 1);
+    // Plan §12 flags obs version-conversion edge cases as needing
+    // validation against real station data; this documents the actual
+    // outcome rather than assuming it works.
+    match &outcomes[0].result {
+        Ok(path) => {
+            let written = rinex::prelude::Rinex::from_file(path)
+                .expect("written output should itself be valid RINEX");
+            assert_eq!(written.header.version.major, 3);
+        }
+        Err(err) => panic!("--rinex-version 3 obs conversion failed: {err}"),
+    }
 
     fs::remove_dir_all(&output_dir).ok();
 }
