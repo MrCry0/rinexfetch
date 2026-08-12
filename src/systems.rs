@@ -1,8 +1,10 @@
-//! GNSS constellation selection, shared by CLI parsing (`--systems`) and,
-//! from Phase 4 onward, by nav/obs system filtering.
+//! GNSS constellation selection, shared by CLI parsing (`--systems`) and by
+//! nav/obs system filtering.
 
 use std::fmt;
 use std::str::FromStr;
+
+use rinex::prelude::Constellation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GnssSystem {
@@ -65,6 +67,22 @@ pub fn parse_systems(raw: &str) -> Result<Vec<GnssSystem>, String> {
     raw.split(',').map(GnssSystem::from_str).collect()
 }
 
+/// Whether `constellation` is covered by the requested `system`. `Sbas` is
+/// broad by design: RINEX/`gnss-rs` model each regional SBAS service
+/// (WAAS, EGNOS, ...) as its own `Constellation` variant, so `--systems
+/// sbas` matches any of them via `Constellation::is_sbas()` rather than a
+/// single exact variant.
+pub fn matches_constellation(system: GnssSystem, constellation: Constellation) -> bool {
+    match system {
+        GnssSystem::Gps => constellation == Constellation::GPS,
+        GnssSystem::Glonass => constellation == Constellation::Glonass,
+        GnssSystem::Galileo => constellation == Constellation::Galileo,
+        GnssSystem::Beidou => constellation == Constellation::BeiDou,
+        GnssSystem::Qzss => constellation == Constellation::QZSS,
+        GnssSystem::Sbas => constellation.is_sbas(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,5 +104,24 @@ mod tests {
     #[test]
     fn rejects_unknown_system() {
         assert!(parse_systems("gps,starlink").is_err());
+    }
+
+    #[test]
+    fn gps_matches_only_gps() {
+        assert!(matches_constellation(GnssSystem::Gps, Constellation::GPS));
+        assert!(!matches_constellation(
+            GnssSystem::Gps,
+            Constellation::Glonass
+        ));
+    }
+
+    #[test]
+    fn sbas_matches_any_regional_sbas_constellation() {
+        assert!(matches_constellation(GnssSystem::Sbas, Constellation::WAAS));
+        assert!(matches_constellation(
+            GnssSystem::Sbas,
+            Constellation::EGNOS
+        ));
+        assert!(!matches_constellation(GnssSystem::Sbas, Constellation::GPS));
     }
 }
