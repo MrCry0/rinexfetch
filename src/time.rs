@@ -6,7 +6,7 @@
 //! (Phase 3), since they depend on what CDDIS actually has published
 //! rather than on the input time alone.
 
-use hifitime::{Epoch, HifitimeError, NANOSECONDS_PER_DAY, TimeScale};
+use hifitime::{Epoch, HifitimeError, NANOSECONDS_PER_DAY, TimeScale, TimeUnits};
 use std::str::FromStr;
 
 #[derive(Debug, thiserror::Error)]
@@ -55,6 +55,13 @@ impl GpsDay {
         Ok(Self::from_epoch(epoch))
     }
 
+    /// Returns the `GpsDay` `days_back` calendar days before this one, used
+    /// by discovery (Phase 3) to walk backward from `--time latest`'s
+    /// anchor day toward the most recent day with a published product.
+    pub fn days_before(&self, days_back: u32) -> Self {
+        Self::from_epoch(self.date_utc - (days_back as i64).days())
+    }
+
     fn from_epoch(epoch: Epoch) -> Self {
         let (year, month, day, ..) = epoch.to_gregorian_utc();
         let date_utc = Epoch::from_gregorian_utc_at_midnight(year, month, day);
@@ -86,6 +93,17 @@ mod tests {
         assert_eq!(day.day_of_year, 6);
         assert_eq!(day.gps_week, 2295);
         assert_eq!(day.gps_day_of_week, 6);
+    }
+
+    #[test]
+    fn days_before_steps_back_across_a_week_boundary() {
+        // 2024-01-07 was a Sunday, the first day of GPS week 2296.
+        let day = GpsDay::resolve("2024-01-07").unwrap();
+        let two_days_back = day.days_before(2);
+        assert_eq!(two_days_back.year, 2024);
+        assert_eq!(two_days_back.day_of_year, 5);
+        assert_eq!(two_days_back.gps_week, 2295);
+        assert_eq!(two_days_back.gps_day_of_week, 5);
     }
 
     #[test]

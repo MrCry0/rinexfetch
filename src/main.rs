@@ -4,7 +4,9 @@ use std::process::ExitCode;
 use clap::{Parser, ValueEnum};
 
 use rinexfetch::cddis::auth::CddisClient;
+use rinexfetch::cddis::discovery;
 use rinexfetch::error::RinexFetchError;
+use rinexfetch::rinex_merge::nav;
 use rinexfetch::secrets::CredentialProvider;
 use rinexfetch::secrets::interactive::InteractiveCredentialProvider;
 use rinexfetch::secrets::keyring::KeyringCredentialProvider;
@@ -79,12 +81,32 @@ fn run(cli: Cli) -> Result<(), RinexFetchError> {
 
     print_summary(&gps_day, &systems, &stations, &cli.output_dir, &token);
 
+    std::fs::create_dir_all(&cli.output_dir).map_err(RinexFetchError::OutputDir)?;
+
+    let candidates = if cli.time == "latest" {
+        discovery::nav_candidates_for_latest(gps_day)
+    } else {
+        discovery::nav_candidates_for_day(gps_day)
+    };
+    let nav_outcome = nav::fetch_and_write(&client, &candidates, &systems, &cli.output_dir)?;
+
     println!();
     println!(
-        "Not yet implemented: CDDIS product discovery, download, and RINEX writing (see \
-         rinexfetch-project-plan.md, Phases 3-4). This build resolves inputs and \
-         authenticates against CDDIS (Phases 1-2)."
+        "Nav: wrote {} ({:?} tier, day {:04}-{:03})",
+        nav_outcome.output_path.display(),
+        nav_outcome.tier,
+        nav_outcome.day.year,
+        nav_outcome.day.day_of_year,
     );
+
+    if !stations.is_empty() {
+        println!();
+        println!(
+            "Not yet implemented: per-station obs download and RINEX writing (see \
+             rinexfetch-project-plan.md, Phase 4). This build fetches the combined nav \
+             file only (Phases 1-3)."
+        );
+    }
 
     Ok(())
 }
