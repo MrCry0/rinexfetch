@@ -3,9 +3,11 @@ use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
 
+use rinexfetch::cddis::auth::CddisClient;
 use rinexfetch::error::RinexFetchError;
 use rinexfetch::secrets::CredentialProvider;
 use rinexfetch::secrets::interactive::InteractiveCredentialProvider;
+use rinexfetch::secrets::keyring::KeyringCredentialProvider;
 use rinexfetch::systems::{self, GnssSystem};
 use rinexfetch::time::GpsDay;
 
@@ -65,20 +67,23 @@ fn run(cli: Cli) -> Result<(), RinexFetchError> {
     let systems = systems::parse_systems(&cli.systems).map_err(RinexFetchError::InvalidSystems)?;
     let stations = parse_stations(&cli.stations);
 
-    let token = match cli.credential_provider {
-        CredentialBackend::Interactive => InteractiveCredentialProvider.token()?,
-        CredentialBackend::Keyring => {
-            return Err(RinexFetchError::CredentialBackendNotImplemented("keyring"));
-        }
+    let provider: Box<dyn CredentialProvider> = match cli.credential_provider {
+        CredentialBackend::Interactive => Box::new(InteractiveCredentialProvider),
+        CredentialBackend::Keyring => Box::new(KeyringCredentialProvider),
     };
+    let token = provider.token()?;
+
+    let client = CddisClient::new(token.clone())?;
+    client.verify_token()?;
+    provider.on_verified(&token)?;
 
     print_summary(&gps_day, &systems, &stations, &cli.output_dir, &token);
 
     println!();
     println!(
-        "Not yet implemented: CDDIS authentication, product discovery, download, and RINEX \
-         writing (see rinexfetch-project-plan.md, Phases 2-4). This build only resolves \
-         inputs and credentials (Phase 1)."
+        "Not yet implemented: CDDIS product discovery, download, and RINEX writing (see \
+         rinexfetch-project-plan.md, Phases 3-4). This build resolves inputs and \
+         authenticates against CDDIS (Phases 1-2)."
     );
 
     Ok(())
@@ -107,7 +112,7 @@ fn print_summary(
 
     println!("Output directory: {}", output_dir.display());
     println!(
-        "Bearer token acquired ({} chars, held in memory only)",
+        "Bearer token verified against CDDIS ({} chars, held in memory only)",
         token.len()
     );
 }

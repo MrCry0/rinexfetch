@@ -14,9 +14,19 @@
 pub enum CredentialError {
     #[error("failed to read credentials: {0}")]
     Io(#[from] std::io::Error),
+    #[error("keyring error: {0}")]
+    Keyring(#[from] keyring::Error),
 }
 
 pub trait CredentialProvider {
     /// Returns the Earthdata Login (URS) bearer token to authenticate with.
     fn token(&self) -> Result<String, CredentialError>;
+
+    /// Called after `token`'s return value has been confirmed to work
+    /// against CDDIS. Backends that persist tokens (the keyring backend)
+    /// override this to save on first successful auth; the default is a
+    /// no-op.
+    fn on_verified(&self, _token: &str) -> Result<(), CredentialError> {
+        Ok(())
+    }
 }
