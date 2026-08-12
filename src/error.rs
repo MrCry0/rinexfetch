@@ -6,6 +6,7 @@
 //! error, an unknown station, or a parse/format problem. Module-specific
 //! error types convert into this one via `#[from]` as each phase lands.
 
+use crate::cddis::auth::CddisAuthError;
 use crate::secrets::CredentialError;
 use crate::time::TimeError;
 
@@ -17,14 +18,12 @@ pub enum RinexFetchError {
     #[error("unsupported --rinex-version {0}: only RINEX 4 output is supported")]
     UnsupportedRinexVersion(u8),
 
-    #[error(
-        "--credential-provider {0} is not implemented yet (see rinexfetch-project-plan.md Phase 2)"
-    )]
-    CredentialBackendNotImplemented(&'static str),
-
     #[error(transparent)]
     Time(#[from] TimeError),
 
     #[error(transparent)]
     Credential(#[from] CredentialError),
+
+    #[error(transparent)]
+    Auth(#[from] CddisAuthError),
 }
