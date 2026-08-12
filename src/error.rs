@@ -16,7 +16,7 @@ pub enum RinexFetchError {
     #[error("invalid --systems value: {0}")]
     InvalidSystems(String),
 
-    #[error("unsupported --rinex-version {0}: only RINEX 4 output is supported")]
+    #[error("unsupported --rinex-version {0}: only 3 or 4 are supported")]
     UnsupportedRinexVersion(u8),
 
     #[error("failed to prepare output directory: {0}")]

@@ -5,9 +5,10 @@
 A Rust command-line tool for a GNSS receiver development lab that retrieves and
 combines RINEX data from NASA's CDDIS archive for a specified time, GNSS
 constellation set, and set of ground stations. Output is standards-compliant
-RINEX 4.xx data intended for lab use in receiver development, testing, and
-post-processing — not for signal generation or RF transmission. Signal
-synthesis is explicitly out of scope for this tool.
+RINEX 3.xx or 4.xx data (selectable via `--rinex-version`) intended for lab
+use in receiver development, testing, and post-processing — not for signal
+generation or RF transmission. Signal synthesis is explicitly out of scope
+for this tool.
 
 ## 2. Goals
 
@@ -19,7 +20,8 @@ synthesis is explicitly out of scope for this tool.
 - Support time selection as `latest` or an explicit datetime, correctly
   resolved to the corresponding GPS day/session and CDDIS product
   availability tier.
-- Output RINEX version 4.xx (upconverting from source version where needed).
+- Output RINEX version 3.xx or 4.xx, selectable via `--rinex-version`,
+  converting from the source version where needed (up or down).
 - Authenticate against CDDIS via NASA Earthdata Login, with credentials
   sourced through a pluggable provider: interactive prompt or OS-native
   keyring in v1, with remote vault backends (HashiCorp Vault, AWS Secrets
@@ -63,7 +65,8 @@ synthesis is explicitly out of scope for this tool.
 
 ### 4.4 Output
 - `--output-dir <path>` — combined nav file plus, if applicable, one obs file
-  per successfully resolved station, all in RINEX 4.xx format.
+  per successfully resolved station, all in the requested RINEX version
+  (`--rinex-version 3` or `4`, default `4`).
 - Each output file's source download is integrity-checked before being
   considered valid: gzip's own CRC32 trailer, validated on decompression
   (CDDIS doesn't publish a separate checksum sidecar for these files; see
@@ -203,7 +206,7 @@ rinexfetch/
 rinexfetch --time latest|<ISO8601> \
            --systems all|gps,glonass,galileo,beidou,qzss,sbas \
            --stations WTZR00DEU,ONSA00SWE,... \
-           --rinex-version 4 \
+           --rinex-version 3|4 \
            --output-dir <path>
 ```
 
@@ -230,20 +233,48 @@ rinexfetch --time latest|<ISO8601> \
 - Parse via the `rinex` crate, apply system filter, write RINEX 4.xx nav
   output.
 
-### Phase 4 — Obs Pipeline
+### Phase 4 — RINEX Version Selection
+- `--rinex-version` accepts `3` or `4` (rejects anything else), replacing
+  the Phase 1 stub that only accepted `4`.
+- Nav output targets whichever version was requested: convert up (3→4,
+  already implemented in Phase 3) via the `rinex` crate's
+  `Header::with_version`, or pass through unchanged when the source is
+  already the requested version.
+- **4→3 downconversion is not achievable with the `rinex` crate as of
+  0.22** when the source is RINEX-4-native (`BRD400DLR`, the rapid tier):
+  confirmed against the live archive, the crate's nav writer returns
+  `FormattingError::MissingNavigationStandards` for such records — tried
+  with both the full constellation set and GPS-only, same result for both,
+  so this isn't a narrow per-constellation gap. rinexfetch surfaces this as
+  `NavError::UnsupportedDownconversion`, a clear, specific error suggesting
+  `--rinex-version 4`, rather than attempting a silent partial write. Note
+  this only affects the rapid tier: when the final tier (`BRDC00IGS`,
+  already RINEX 3) is available, `--rinex-version 3` is a same-version
+  passthrough with no conversion attempted, so it always works.
+- Non-ephemeris nav frames (system time offset / earth orientation /
+  ionosphere model — all RINEX-4-only) are silently dropped by the `rinex`
+  crate's nav writer regardless of target version, as of 0.22 (its
+  formatter only handles `NavFrame::EPH`). rinexfetch counts these before
+  writing and reports the count, rather than leaving the gap undetected.
+- Land this before Phase 5 (Obs Pipeline) so the obs pipeline is built
+  against the final version-selection design from the start, rather than
+  needing a follow-up rework once obs output also has to respect
+  `--rinex-version`.
+
+### Phase 5 — Obs Pipeline
 - Station ID normalization and validation.
 - CDDIS path discovery for per-station obs products.
-- Download, Hatanaka decompression, parse, system filter, write RINEX 4.xx
-  obs output per station.
+- Download, Hatanaka decompression, parse, system filter, write obs output
+  per station in the requested RINEX version.
 - Per-station error isolation and reporting.
 
-### Phase 5 — Reliability Hardening
+### Phase 6 — Reliability Hardening
 - Retry/backoff logic for transient network failures.
 - Structured error classification and logging.
 - Run summary reporting (per-file success/failure, product tier used, etc.).
 - Test fixtures against known CDDIS products for regression testing.
 
-### Phase 6 — Documentation & Handoff
+### Phase 7 — Documentation & Handoff
 - Usage documentation.
 - Notes on adding new `CredentialProvider` backends (Vault, AWS, etc.) for
   future work.
@@ -255,8 +286,14 @@ rinexfetch --time latest|<ISO8601> \
 - Scheduled/daemon execution mode — deferred past v1.
 - Full "world = all IGS/MGEX stations" obs mode — deferred past v1; current
   scope requires an explicit station list for any obs retrieval.
-- RINEX version auto-upconversion edge cases (2.11 → 4.xx obs-type mapping)
-  to be validated against real CDDIS station data during Phase 4.
+- RINEX version conversion edge cases (2.11 → 3.xx/4.xx obs-type mapping)
+  to be validated against real CDDIS station data during Phase 5.
+- 4→3 nav downconversion from a RINEX-4-native source is unsupported (see
+  Phase 4) due to a `rinex` crate limitation, not a rinexfetch design
+  choice. Deferred past v1: either contribute a fix upstream, or implement
+  nav-message reformatting ourselves if it becomes a real blocker (in
+  practice it only bites when `--rinex-version 3` is requested and the
+  final tier isn't published yet, so the rapid tier is the only source).
 - Username/password authentication via the full URS OAuth authorization-code
   exchange (Basic Auth + cookie-jar redirect handling) — deferred past v1;
   a bearer token is sufficient and much cheaper to implement correctly, and
