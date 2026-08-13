@@ -116,7 +116,15 @@ be added without touching the CDDIS auth logic.
   Credential Manager, via a cross-platform keyring library, storing the
   token. Falls back to interactive prompt (with optional save-to-keyring) if
   no stored token is found. Note tokens expire after 60 days, so a stored
-  token can go stale between runs.
+  token can go stale between runs. **Requires a working platform credential
+  store to be reachable** — on Linux specifically, this means a D-Bus
+  Secret Service (e.g. `gnome-keyring`, `kwallet`) must actually be
+  running. Confirmed empirically: on a Linux system with no Secret Service
+  reachable (common on headless/server systems — exactly where a GNSS lab
+  tool is often run), the `keyring` crate can't establish *any* default
+  store, which without special handling surfaces as an opaque "No default
+  store has been set" error. rinexfetch maps this specific case to a clear,
+  actionable error suggesting `--credential-provider interactive` instead.
 
 ### 6.3 Future backends (not in v1, same trait)
 - HashiCorp Vault

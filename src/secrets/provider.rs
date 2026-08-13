@@ -14,8 +14,25 @@
 pub enum CredentialError {
     #[error("failed to read credentials: {0}")]
     Io(#[from] std::io::Error),
+    #[error(
+        "no OS-native credential store is available on this system (Secret Service on Linux, \
+         Keychain on macOS, Credential Manager on Windows). On Linux this usually means no \
+         D-Bus Secret Service is running, which is common on headless/server systems — use \
+         --credential-provider interactive instead, or install and start a Secret Service \
+         provider such as gnome-keyring or kwallet."
+    )]
+    NoKeyringBackend,
     #[error("keyring error: {0}")]
-    Keyring(#[from] keyring::Error),
+    Keyring(keyring::Error),
+}
+
+impl From<keyring::Error> for CredentialError {
+    fn from(err: keyring::Error) -> Self {
+        match err {
+            keyring::Error::NoDefaultStore => CredentialError::NoKeyringBackend,
+            other => CredentialError::Keyring(other),
+        }
+    }
 }
 
 pub trait CredentialProvider {
@@ -28,5 +45,25 @@ pub trait CredentialProvider {
     /// no-op.
     fn on_verified(&self, _token: &str) -> Result<(), CredentialError> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_default_store_maps_to_a_specific_actionable_error() {
+        let err: CredentialError = keyring::Error::NoDefaultStore.into();
+        assert!(matches!(err, CredentialError::NoKeyringBackend));
+    }
+
+    #[test]
+    fn other_keyring_errors_pass_through() {
+        let err: CredentialError = keyring::Error::NoEntry.into();
+        assert!(matches!(
+            err,
+            CredentialError::Keyring(keyring::Error::NoEntry)
+        ));
     }
 }
