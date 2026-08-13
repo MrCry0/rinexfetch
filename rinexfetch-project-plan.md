@@ -187,6 +187,22 @@ rinexfetch/
   caught by the `302`-to-`urs.earthdata.nasa.gov` redirect (see §5); content
   type/magic-byte checking is kept as a secondary guard, not the primary
   signal.
+- **Nav candidate fallback survives malformed content, not just 404s.**
+  Confirmed against the live archive (2026-08-13, a real user report): a
+  downloaded nav candidate that fails to parse doesn't abort the whole
+  `--time latest` run — `fetch_and_write` treats it the same as a `404`
+  and tries the next candidate. Two real, distinct causes were observed on
+  the same day: (1) CDDIS's own merge tooling (`MergeMNfile.tcl`, per the
+  file's own `PGM / RUN BY / DATE` line) occasionally drops a newline
+  between two concatenated per-source RINEX headers, which the `rinex`
+  crate reports as a clean `ParsingError` ("rinex format identification");
+  (2) separately, the `rinex` crate itself can *panic* (not return `Err`)
+  on certain nav content — a `KbModel::parse` (Klobuchar ionosphere model)
+  bounds panic was reproduced. Since `fetch_and_write` runs on
+  untrusted, externally-controlled CDDIS content, the parse/write call is
+  wrapped in `std::panic::catch_unwind` so a third-party crate panic can't
+  crash the whole process — it's treated as "this candidate is unusable,
+  try the next" exactly like a parse error.
 - **Per-station isolation**: a failure or unknown ID for one station does not
   abort nav retrieval or other stations' obs retrieval.
 - **Checksum verification** on all downloaded files where CDDIS publishes

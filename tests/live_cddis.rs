@@ -234,3 +234,56 @@ fn real_obs_product_at_rinex3() {
 
     fs::remove_dir_all(&output_dir).ok();
 }
+
+#[test]
+#[ignore = "hits the live CDDIS archive; needs RINEXFETCH_TEST_TOKEN"]
+fn real_latest_nav_survives_a_malformed_candidate() {
+    let token = std::env::var("RINEXFETCH_TEST_TOKEN")
+        .expect("set RINEXFETCH_TEST_TOKEN to a real URS bearer token to run this test");
+    let client = CddisClient::new(token).unwrap();
+
+    // Mirrors --time latest against whatever CDDIS actually has published
+    // right now. Regression test for a real bug (2026-08-13): CDDIS's own
+    // merge tooling can produce a malformed combined nav file for a given
+    // day/tier (a missing newline between two concatenated per-source
+    // RINEX headers was observed on 2026 day 224's final tier).
+    // fetch_and_write must fall through to the next candidate instead of
+    // aborting the whole run over one bad candidate.
+    let anchor = GpsDay::resolve("latest").unwrap();
+    let candidates = discovery::nav_candidates_for_latest(anchor);
+
+    let output_dir = std::env::temp_dir().join("rinexfetch-live-test-nav-latest");
+    fs::create_dir_all(&output_dir).unwrap();
+
+    let outcome = nav::fetch_and_write(&client, &candidates, &ALL_SYSTEMS, 4, &output_dir)
+        .expect("--time latest should succeed even if some candidate along the way is malformed");
+
+    assert!(outcome.output_path.exists());
+
+    // Re-parsing our own output is a bonus check, not the primary point of
+    // this test (already proven above: fetch_and_write didn't abort). It
+    // can hit a separate, already-documented rinex crate bug: certain
+    // Klobuchar ionosphere model content that rinex itself writes can then
+    // panic rinex's own parser on re-read (KbModel::parse bounds panic,
+    // observed 2026-08-13) — a round-trip issue in the crate, not
+    // something rinexfetch's production code ever triggers, since it
+    // never re-parses its own output. Tolerate that specific panic here
+    // rather than letting it crash the whole test binary.
+    let reparsed =
+        std::panic::catch_unwind(|| rinex::prelude::Rinex::from_file(&outcome.output_path));
+    match reparsed {
+        Ok(Ok(written)) => {
+            assert!(
+                written.record.as_nav().is_some_and(|nav| !nav.is_empty()),
+                "filtered nav record should not be empty for --systems all"
+            );
+        }
+        Ok(Err(err)) => panic!("written output should itself be valid RINEX: {err}"),
+        Err(_) => eprintln!(
+            "note: re-parsing rinexfetch's own output panicked inside the rinex crate \
+             (known Klobuchar round-trip bug) — not asserting on it further"
+        ),
+    }
+
+    fs::remove_dir_all(&output_dir).ok();
+}

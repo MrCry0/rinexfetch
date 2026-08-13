@@ -146,6 +146,13 @@ success/failure summary.
   real-time-stream product (`BRD400DLR`, ~3h after day close) when final
   isn't available yet, and labels output with which tier was actually used
   rather than silently serving stale or incomplete data.
+- **Falls through past malformed candidates, too**, not just missing ones.
+  If a downloaded candidate fails to parse — CDDIS's own merge tooling has
+  been observed to occasionally produce a malformed file — or triggers a
+  panic inside the RINEX parsing library, `rinexfetch` treats it the same
+  as "not published yet" and tries the next candidate, rather than
+  aborting the whole run. A crate-internal panic on untrusted, externally
+  controlled input is caught rather than allowed to crash the process.
 - **Per-station isolation**: a failure or unknown ID for one station does
   not abort nav retrieval or other stations' obs retrieval.
 - **Download integrity** via gzip's own CRC32 trailer, validated on
