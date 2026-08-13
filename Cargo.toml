@@ -3,6 +3,7 @@ name = "rinexfetch"
 version = "0.1.0"
 edition = "2024"
 description = "Fetch and combine RINEX data from NASA CDDIS for GNSS receiver lab work"
+authors = ["Oleksandr Suvorov <cryosay@gmail.com>"]
 license = "GPL-3.0-only"
 readme = "README.md"
 repository = "https://github.com/MrCry0/rinexfetch"

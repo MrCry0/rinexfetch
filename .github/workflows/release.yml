@@ -12,18 +12,14 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build and publish release
+  verify-version:
+    name: Verify tag matches Cargo.toml version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: stable
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
       - name: Verify tag matches Cargo.toml version
         run: |
           set -euo pipefail
@@ -33,6 +29,19 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $cargo_version"
             exit 1
           fi
+
+  build-linux:
+    name: Build (Linux)
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-linux
 
       - name: Run tests
         run: cargo test --verbose
@@ -60,13 +69,139 @@ jobs:
       - name: Build .rpm package
         run: cargo generate-rpm
 
-      - name: Collect and checksum artifacts
+      - name: Collect artifacts
         run: |
           set -euo pipefail
           mkdir -p dist
           cp rinexfetch-*.tar.gz dist/
           cp target/debian/*.deb dist/
           cp target/generate-rpm/*.rpm dist/
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-linux
+          path: dist/*
+          if-no-files-found: error
+
+  build-macos:
+    name: Build (macOS, ${{ matrix.target }})
+    needs: verify-version
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-macos-${{ matrix.target }}
+
+      - name: Run tests (native target only; the other is cross-compiled below)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: cargo test --verbose
+
+      - name: Build release binary
+        run: cargo build --release --verbose --target ${{ matrix.target }}
+
+      - name: Package binary tarball and .pkg
+        run: |
+          set -euo pipefail
+          bin_dir="target/${{ matrix.target }}/release"
+          staging="rinexfetch-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir -p "$staging"
+          cp "$bin_dir/rinexfetch" README.md LICENSE "$staging"/
+          tar czf "${staging}.tar.gz" "$staging"
+
+          version=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].version')
+          pkgroot="$RUNNER_TEMP/pkgroot"
+          mkdir -p "$pkgroot/usr/local/bin"
+          cp "$bin_dir/rinexfetch" "$pkgroot/usr/local/bin/"
+          pkgbuild --root "$pkgroot" \
+            --identifier io.github.mrcry0.rinexfetch \
+            --version "$version" \
+            --install-location / \
+            "rinexfetch-${version}-${{ matrix.target }}.pkg"
+
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp rinexfetch-*.tar.gz dist/
+          cp rinexfetch-*.pkg dist/
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-macos-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  build-windows:
+    name: Build (Windows)
+    needs: verify-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-windows
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Build release binary
+        run: cargo build --release --verbose
+
+      - name: Package binary zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          staging="rinexfetch-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc"
+          mkdir -p "$staging"
+          cp target/release/rinexfetch.exe README.md LICENSE "$staging"/
+          7z a "${staging}.zip" "$staging"
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix --locked
+
+      - name: Build .msi package
+        run: cargo wix --no-build --nocapture
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp rinexfetch-*.zip dist/
+          cp target/wix/*.msi dist/
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-windows
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksum artifacts
+        run: |
+          set -euo pipefail
           (cd dist && sha256sum -- * > SHA256SUMS)
 
       - name: Create GitHub release
@@ -75,5 +210,6 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
             --title "rinexfetch $GITHUB_REF_NAME" \
-            --notes "Packages: .deb (Debian/Ubuntu), .rpm (Fedora), and an x86_64 Linux (glibc) tarball. Verify downloads against SHA256SUMS. See rinexfetch-project-plan.md for the full design."
+            --notes "Packages: .deb (Debian/Ubuntu), .rpm (Fedora), .pkg (macOS, arm64 and x86_64), .msi (Windows x86_64), plus plain tarballs/zip for each platform. Installers are unsigned; expect a Gatekeeper/SmartScreen warning on first run. Verify downloads against SHA256SUMS. See rinexfetch-project-plan.md for the full design."
