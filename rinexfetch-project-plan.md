@@ -224,7 +224,10 @@ rinexfetch --time latest|<ISO8601> \
   requests (`reqwest`, no cookie jar needed).
 - Redirect/status-based auth-failure detection, plus content-type validation
   as a secondary guard against unexpected response shapes.
-- OS-native keyring backend, including save-on-first-successful-auth flow.
+- OS-native keyring backend, including save-on-first-successful-auth flow:
+  a freshly entered token is only persisted with explicit user consent
+  (`Save this token to your OS keyring for future runs? [y/N]`), asked
+  once, not on every run — an already-stored token is reused silently.
 
 ### Phase 3 — Nav Pipeline (end-to-end path 1)
 - CDDIS path discovery for the combined broadcast nav product, including
