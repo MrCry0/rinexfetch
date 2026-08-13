@@ -96,7 +96,12 @@ backends can be added without touching the CDDIS auth logic:
 - **v1**: interactive prompt (no echo), or an OS-native keyring (Linux
   Secret Service, macOS Keychain, Windows Credential Manager), falling back
   to an interactive prompt with optional save-to-keyring if nothing is
-  stored.
+  stored. The keyring backend needs a working platform credential store to
+  be reachable — on Linux, a D-Bus Secret Service (`gnome-keyring`,
+  `kwallet`, ...) must actually be running, which it often isn't on
+  headless/server systems. If it isn't available, `rinexfetch` reports a
+  clear error and suggests `--credential-provider interactive` instead of
+  failing with an opaque message.
 - **planned**: HashiCorp Vault, AWS Secrets Manager, Azure Key Vault / GCP
   Secret Manager, Infisical / Doppler / Bitwarden Secrets Manager, behind
   the same trait.
