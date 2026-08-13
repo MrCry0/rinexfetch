@@ -4,6 +4,7 @@
 //! to RINEX 4.xx if needed, and writing the result.
 
 use std::io::{BufReader, Cursor, Read};
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
@@ -21,10 +22,11 @@ use crate::time::GpsDay;
 #[derive(Debug, thiserror::Error)]
 pub enum NavError {
     #[error(
-        "no combined nav product is published yet for the requested day \
-         (tried {tried} candidate(s) across final/rapid tiers and fallback days)"
+        "no usable combined nav product found for the requested day (tried {tried} \
+         candidate(s) across final/rapid tiers and fallback days; {malformed} of those \
+         downloaded successfully but had unparseable/malformed content)"
     )]
-    NotYetPublished { tried: usize },
+    NotYetPublished { tried: usize, malformed: usize },
     #[error(transparent)]
     Download(#[from] DownloadError),
     #[error("failed to decompress downloaded nav product: {0}")]
@@ -40,6 +42,8 @@ pub enum NavError {
          no RINEX 3 equivalent (try --rinex-version 4)"
     )]
     UnsupportedDownconversion,
+    #[error("internal error while parsing/writing this candidate: {0}")]
+    Panicked(String),
 }
 
 #[derive(Debug)]
@@ -55,11 +59,25 @@ pub struct NavOutcome {
     pub dropped_non_ephemeris: usize,
 }
 
-/// Tries each candidate in order, returning the first that downloads
-/// successfully. A `404` on a candidate means that specific product isn't
-/// published yet, so the next candidate is tried; any other failure (auth,
-/// network, content validation) is fatal immediately, since no other
-/// candidate would fix it.
+/// Tries each candidate in order, returning the first that downloads and
+/// parses successfully. A `404` on a candidate means that specific product
+/// isn't published yet, so the next candidate is tried. A downloaded
+/// candidate that fails to parse (`NavError::Parse`), isn't a nav record
+/// (`NavError::UnexpectedRecordType`), or triggers a panic inside the
+/// `rinex` crate (`NavError::Panicked`) is *also* not treated as fatal —
+/// it's skipped in favor of the next candidate, since that failure is
+/// about this one candidate's content, not something a different day/tier
+/// would necessarily share. Confirmed against the live archive: CDDIS's
+/// own merge tooling occasionally produces a malformed combined nav file
+/// (a missing newline between two concatenated per-source RINEX headers,
+/// for a day observed 2026-08-13), and separately, the `rinex` crate
+/// itself can panic (not just return `Err`) on certain nav content (a
+/// `KbModel::parse` bounds panic, also observed 2026-08-13) — since
+/// `write_filtered_nav` runs on untrusted, externally-controlled CDDIS
+/// content, its call is wrapped in `catch_unwind` so a third-party crate
+/// panic can't take down the whole process. Any other failure (auth,
+/// network, decompression, write) is still fatal immediately, since no
+/// other candidate would fix it.
 pub fn fetch_and_write(
     client: &CddisClient,
     candidates: &[NavCandidate],
@@ -67,11 +85,23 @@ pub fn fetch_and_write(
     target_version_major: u8,
     output_dir: &Path,
 ) -> Result<NavOutcome, NavError> {
+    let mut malformed = 0;
     for candidate in candidates {
-        match download::download(client, &candidate.url) {
-            Ok(gzip_bytes) => {
-                let (output_path, dropped_non_ephemeris) =
-                    write_filtered_nav(&gzip_bytes, systems, target_version_major, output_dir)?;
+        let gzip_bytes = match download::download(client, &candidate.url) {
+            Ok(bytes) => bytes,
+            Err(DownloadError::Request(err)) if err.status() == Some(StatusCode::NOT_FOUND) => {
+                continue;
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+            write_filtered_nav(&gzip_bytes, systems, target_version_major, output_dir)
+        }))
+        .unwrap_or_else(|payload| Err(NavError::Panicked(panic_message(&payload))));
+
+        match result {
+            Ok((output_path, dropped_non_ephemeris)) => {
                 return Ok(NavOutcome {
                     day: candidate.day,
                     tier: candidate.tier,
@@ -79,15 +109,37 @@ pub fn fetch_and_write(
                     dropped_non_ephemeris,
                 });
             }
-            Err(DownloadError::Request(err)) if err.status() == Some(StatusCode::NOT_FOUND) => {
+            Err(
+                err @ (NavError::Parse(_) | NavError::UnexpectedRecordType | NavError::Panicked(_)),
+            ) => {
+                eprintln!(
+                    "warning: {:?} tier for day {:04}-{:03} downloaded but is unusable ({err}); \
+                     trying the next candidate",
+                    candidate.tier, candidate.day.year, candidate.day.day_of_year
+                );
+                malformed += 1;
                 continue;
             }
-            Err(err) => return Err(err.into()),
+            Err(err) => return Err(err),
         }
     }
     Err(NavError::NotYetPublished {
         tried: candidates.len(),
+        malformed,
     })
+}
+
+/// Extracts a human-readable message from a caught panic payload, which is
+/// typically a `&str` or `String` (from `panic!`/`.expect()`/etc.) but
+/// isn't guaranteed to be either.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        message.to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
 }
 
 fn write_filtered_nav(
