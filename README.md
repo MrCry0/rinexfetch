@@ -152,9 +152,13 @@ success/failure summary.
 
 ## Installation
 
-Prebuilt `.deb` (Debian/Ubuntu), `.rpm` (Fedora), and a plain `x86_64-linux-gnu`
-tarball are published on the [releases page][releases] for every tagged
-version, alongside a `SHA256SUMS` file to verify downloads against.
+Prebuilt packages are published on the [releases page][releases] for every
+tagged version, alongside a `SHA256SUMS` file to verify downloads against:
+`.deb` (Debian/Ubuntu), `.rpm` (Fedora), `.pkg` (macOS, both `arm64` and
+`x86_64`), `.msi` (Windows `x86_64`), plus a plain tarball/zip per platform
+for a no-install option. macOS/Windows installers are unsigned (no Apple
+Developer or code-signing certificate in v1), so expect a
+Gatekeeper/SmartScreen warning on first run.
 
 ```
 # Debian / Ubuntu
@@ -162,6 +166,12 @@ sudo apt install ./rinexfetch_<version>-1_amd64.deb
 
 # Fedora
 sudo dnf install ./rinexfetch-<version>-1.x86_64.rpm
+
+# macOS
+sudo installer -pkg ./rinexfetch-<version>-<arch>-apple-darwin.pkg -target /
+
+# Windows (PowerShell, run as Administrator)
+msiexec /i rinexfetch-<version>-x86_64-pc-windows-msvc.msi
 ```
 
 [releases]: https://github.com/MrCry0/rinexfetch/releases
@@ -208,7 +218,7 @@ specific test name to run just one, e.g. `real_obs_product_at_rinex3`.)
 
 ### Building packages locally
 
-Packaging is driven by `[package.metadata.deb]` and
+**Linux** packaging is driven by `[package.metadata.deb]` and
 `[package.metadata.generate-rpm]` in `Cargo.toml`, via
 [`cargo-deb`](https://lib.rs/cargo-deb) and
 [`cargo-generate-rpm`](https://lib.rs/cargo-generate-rpm). Both are pure Rust
@@ -222,18 +232,41 @@ cargo deb --no-build            # -> target/debian/*.deb
 cargo generate-rpm              # -> target/generate-rpm/*.rpm
 ```
 
+**Windows** packaging uses [`cargo-wix`](https://lib.rs/cargo-wix), driven by
+the checked-in [`wix/main.wxs`](wix/main.wxs) template, on top of the WiX
+Toolset (preinstalled on GitHub's `windows-latest` runners; install it
+yourself to build locally on Windows).
+
+```
+cargo install cargo-wix
+
+cargo build --release
+cargo wix --no-build            # -> target/wix/*.msi
+```
+
+**macOS** packaging uses the system `pkgbuild` tool (part of Xcode Command
+Line Tools, no extra install needed) — there's no dedicated `cargo`
+subcommand for `.pkg` files, so this is a plain shell script; see the
+`Build .pkg`/`Build .pkg and tarball` steps in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) and
+[`.github/workflows/release.yml`](.github/workflows/release.yml) for the
+exact commands.
+
 ## CI & releases
 
 GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs
-`cargo fmt --check`, `cargo clippy`, `cargo build`, and `cargo test` on every
-push and pull request, plus a packaging smoke test that builds the `.deb` and
-`.rpm` and uploads them as workflow artifacts.
+`cargo fmt --check` and `cargo clippy` once, `cargo build`/`cargo test` on
+Linux, macOS, and Windows on every push and pull request, plus a packaging
+smoke test that builds the `.deb`, `.rpm`, `.msi`, and `.pkg` and uploads
+them as workflow artifacts.
 
 Pushing a tag matching `v*.*.*` runs
 [`.github/workflows/release.yml`](.github/workflows/release.yml), which
-verifies the tag matches the `Cargo.toml` version, re-runs the test suite,
-builds the release binary tarball, `.deb`, and `.rpm`, and publishes them to
-a GitHub release with a `SHA256SUMS` file.
+verifies the tag matches the `Cargo.toml` version, re-runs the test suite on
+each platform, builds release binaries for Linux (`x86_64`), macOS
+(`arm64` and `x86_64`), and Windows (`x86_64`), packages them as
+`.deb`/`.rpm`/`.pkg`/`.msi` plus a tarball/zip per platform, and publishes
+everything to a GitHub release with a `SHA256SUMS` file.
 
 ## License
 
