@@ -174,6 +174,38 @@ cargo test
 cargo clippy
 ```
 
+### Testing against the live CDDIS archive
+
+`cargo test` above only runs hermetic tests — no network access, using a
+local mock HTTP server to exercise the auth/download classification logic.
+Live-network tests that hit the real CDDIS archive live in
+[`tests/live_cddis.rs`](tests/live_cddis.rs) and are `#[ignore]`d by
+default, so they never run in CI or a plain `cargo test`. They exist
+because hand-crafted RINEX fixtures risk validating a bug in the fixture
+rather than in the code; testing against real CDDIS data caught several
+real issues during development that local mocks couldn't have (see the
+project plan for details).
+
+Two tests only check auth-failure classification and need no credentials:
+
+```
+cargo test -- --ignored
+```
+
+The rest exercise the full nav/obs pipelines against real data and need a
+real NASA Earthdata Login (URS) bearer token — generate one at
+`urs.earthdata.nasa.gov/users/<username>/user_tokens` (see
+[Authentication](#authentication) above) — passed via
+`RINEXFETCH_TEST_TOKEN`:
+
+```
+RINEXFETCH_TEST_TOKEN="$(cat ~/tmp/urs.token)" \
+  cargo test --test live_cddis real_ -- --ignored --nocapture
+```
+
+(`real_` matches every nav- and obs-pipeline live test; substitute a more
+specific test name to run just one, e.g. `real_obs_product_at_rinex3`.)
+
 ### Building packages locally
 
 Packaging is driven by `[package.metadata.deb]` and
