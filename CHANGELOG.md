@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] - 2026-08-14
+
+### Changed
+
+- Generalized the project's stated purpose. Documentation previously
+  described rinexfetch as a tool for GNSS receiver development labs;
+  it is now described as a general-purpose tool for anyone who needs
+  combined RINEX files, for post-processing, analysis, testing, or
+  other GNSS work.
+
+### Fixed
+
+- Corrected the README's Reliability section, which incorrectly
+  stated that retry/backoff on transient network failures and
+  structured logging were implemented. Neither is implemented; the
+  section now accurately describes current error handling and notes
+  both as outstanding work.
+
 ## [1.0.0] - 2026-08-14
 
 First stable release. `rinexfetch` retrieves and combines RINEX GNSS
