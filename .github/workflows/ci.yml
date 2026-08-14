@@ -49,8 +49,34 @@ jobs:
       - name: Build
         run: cargo build --verbose
 
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
+
       - name: Test
-        run: cargo test --verbose
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo nextest run 2>&1 | tee nextest-output.txt
+
+      - name: Doc tests
+        run: cargo test --doc --verbose
+
+      - name: Write test summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Test results (${{ matrix.os }})"
+            echo
+            grep '^ *Summary' nextest-output.txt || echo '(no summary line found; see full output below)'
+            echo
+            echo '<details><summary>Full test output</summary>'
+            echo
+            echo '```text'
+            cat nextest-output.txt
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   package:
     name: Package (${{ matrix.kind }})
