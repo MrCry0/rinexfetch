@@ -14,7 +14,7 @@ products.
 
 ## Status
 
-`1.0.0`. Both the combined nav pipeline and per-station obs fetching work
+`1.0.1`. Both the combined nav pipeline and per-station obs fetching work
 end-to-end: auth, `--time latest`/explicit-date resolution, product
 discovery (nav's final/rapid fallback; obs has no tier concept), download,
 filtering, RINEX 3.xx/4.xx output, and per-station error isolation for

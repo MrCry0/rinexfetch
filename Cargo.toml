@@ -1,6 +1,6 @@
 [package]
 name = "rinexfetch"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 description = "Fetch and combine RINEX data from NASA's CDDIS archive"
 authors = ["Oleksandr Suvorov <cryosay@gmail.com>"]
