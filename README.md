@@ -6,10 +6,11 @@ RINEX fetch & combine tool.
 
 `rinexfetch` is a command-line tool that retrieves RINEX data from NASA's
 CDDIS archive for a given time, GNSS constellation set, and set of ground
-stations, and produces standards-compliant RINEX 3.xx or 4.xx output. It is
-intended for lab use in receiver development, testing, and post-processing.
-It is **not** a signal generation or RF transmission tool — it only
-retrieves and reformats existing RINEX products.
+stations, and produces standards-compliant RINEX 3.xx or 4.xx output for
+anyone who needs combined RINEX files, whether for post-processing,
+analysis, testing, or other GNSS work. It is **not** a signal generation
+or RF transmission tool: it only retrieves and reformats existing RINEX
+products.
 
 ## Status
 
@@ -164,7 +165,7 @@ success/failure summary.
   decompression (CDDIS doesn't publish a separate checksum sidecar for
   these files), plus retries with backoff on transient network failures.
 - **Structured logging** distinguishing failure classes (auth /
-  not-yet-published / network / unknown-station / parse-format) for lab
+  not-yet-published / network / unknown-station / parse-format) for
   troubleshooting.
 
 ## Installation

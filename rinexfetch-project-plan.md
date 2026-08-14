@@ -2,13 +2,13 @@
 
 ## 1. Purpose
 
-A Rust command-line tool for a GNSS receiver development lab that retrieves and
-combines RINEX data from NASA's CDDIS archive for a specified time, GNSS
-constellation set, and set of ground stations. Output is standards-compliant
-RINEX 3.xx or 4.xx data (selectable via `--rinex-version`) intended for lab
-use in receiver development, testing, and post-processing — not for signal
-generation or RF transmission. Signal synthesis is explicitly out of scope
-for this tool.
+A Rust command-line tool that retrieves and combines RINEX data from NASA's
+CDDIS archive for a specified time, GNSS constellation set, and set of
+ground stations. Output is standards-compliant RINEX 3.xx or 4.xx data
+(selectable via `--rinex-version`) for anyone who needs combined RINEX
+files: post-processing, analysis, testing, or other GNSS work, not for
+signal generation or RF transmission. Signal synthesis is explicitly out
+of scope for this tool.
 
 ## 2. Goals
 
@@ -120,8 +120,9 @@ be added without touching the CDDIS auth logic.
   store to be reachable** — on Linux specifically, this means a D-Bus
   Secret Service (e.g. `gnome-keyring`, `kwallet`) must actually be
   running. Confirmed empirically: on a Linux system with no Secret Service
-  reachable (common on headless/server systems — exactly where a GNSS lab
-  tool is often run), the `keyring` crate can't establish *any* default
+  reachable (common on headless/server systems, exactly where a
+  batch-processing tool like this is often run), the `keyring` crate can't
+  establish *any* default
   store, which without special handling surfaces as an opaque "No default
   store has been set" error. rinexfetch maps this specific case to a clear,
   actionable error suggesting `--credential-provider interactive` instead.
@@ -209,7 +210,7 @@ rinexfetch/
   one.
 - **Retries with backoff** on transient network failures.
 - **Structured logging** distinguishing failure classes (auth / not-yet-
-  published / network / unknown-station / parse-format) for lab
+  published / network / unknown-station / parse-format) for
   troubleshooting.
 
 ## 9. Key Dependencies (proposed)
