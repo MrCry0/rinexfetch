@@ -1,9 +1,6 @@
 [package]
 name = "rinexfetch"
-# NOTE: on a pre-release version (a "-" suffix), keep
-# package.metadata.generate-rpm.version below in sync — RPM's version field
-# can't contain "-", so it needs the same value with "-" replaced by "~".
-version = "0.3.0-rc.2"
+version = "1.0.0"
 edition = "2024"
 description = "Fetch and combine RINEX data from NASA CDDIS for GNSS receiver lab work"
 authors = ["Oleksandr Suvorov <cryosay@gmail.com>"]
@@ -39,12 +36,6 @@ assets = [
 ]
 
 [package.metadata.generate-rpm]
-# Keep in sync with package.version above on a pre-release: RPM's version
-# field forbids "-" (reserved as the name-version-release separator), so a
-# SemVer pre-release like "0.3.0-rc.2" needs "-" replaced by RPM's own
-# "~" pre-release marker here. Not needed for a plain "X.Y.Z" release with
-# no "-" — remove this line then.
-version = "0.3.0~rc.2"
 assets = [
     { source = "target/release/rinexfetch", dest = "/usr/bin/rinexfetch", mode = "755" },
     { source = "README.md", dest = "/usr/share/doc/rinexfetch/README.md", mode = "644", doc = true },
