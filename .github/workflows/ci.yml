@@ -54,6 +54,12 @@ jobs:
 
       - name: Test
         shell: bash
+        env:
+          # Piping to tee means nextest isn't writing to a terminal, but the
+          # job-level CARGO_TERM_COLOR=always would still force ANSI color
+          # codes into nextest-output.txt, breaking both the grep below and
+          # the plain-text rendering of the captured output in the summary.
+          CARGO_TERM_COLOR: never
         run: |
           set -o pipefail
           cargo nextest run 2>&1 | tee nextest-output.txt
