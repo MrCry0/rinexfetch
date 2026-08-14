@@ -163,10 +163,14 @@ success/failure summary.
   not abort nav retrieval or other stations' obs retrieval.
 - **Download integrity** via gzip's own CRC32 trailer, validated on
   decompression (CDDIS doesn't publish a separate checksum sidecar for
-  these files), plus retries with backoff on transient network failures.
-- **Structured logging** distinguishing failure classes (auth /
-  not-yet-published / network / unknown-station / parse-format) for
-  troubleshooting.
+  these files).
+- **Specific, distinct errors** for each failure class (auth,
+  not-yet-published product, network, unknown station, parse/format),
+  instead of a generic failure with no indication of the cause.
+
+Retry/backoff on transient network failures and a formal structured
+logging/run-summary layer are not yet implemented; see Phase 6 in
+[`rinexfetch-project-plan.md`](rinexfetch-project-plan.md).
 
 ## Installation
 
