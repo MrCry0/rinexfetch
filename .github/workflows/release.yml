@@ -209,7 +209,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          prerelease_flag=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            # A tag with a SemVer pre-release identifier (e.g. v0.2.0-rc.1)
+            # is published as a GitHub pre-release, not "Latest".
+            prerelease_flag=(--prerelease)
+          fi
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "rinexfetch $GITHUB_REF_NAME" \
+            "${prerelease_flag[@]}" \
             --notes "Packages: .deb (Debian/Ubuntu), .rpm (Fedora), .pkg (macOS, arm64 and x86_64), .msi (Windows x86_64), plus plain tarballs/zip for each platform. Installers are unsigned; expect a Gatekeeper/SmartScreen warning on first run. Verify downloads against SHA256SUMS. See rinexfetch-project-plan.md for the full design."

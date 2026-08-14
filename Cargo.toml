@@ -1,6 +1,9 @@
 [package]
 name = "rinexfetch"
-version = "0.1.0"
+# NOTE: on a pre-release version (a "-" suffix), keep
+# package.metadata.generate-rpm.version below in sync — RPM's version field
+# can't contain "-", so it needs the same value with "-" replaced by "~".
+version = "0.2.0-rc.1"
 edition = "2024"
 description = "Fetch and combine RINEX data from NASA CDDIS for GNSS receiver lab work"
 authors = ["Oleksandr Suvorov <cryosay@gmail.com>"]
@@ -25,8 +28,8 @@ license-file = ["LICENSE", "0"]
 extended-description = """\
 Fetches and combines RINEX data from NASA's CDDIS archive for a given \
 time, GNSS constellation set, and set of ground stations, producing \
-standards-compliant RINEX 4.xx output for GNSS receiver development \
-lab use. Not a signal generation or RF transmission tool."""
+standards-compliant RINEX 3.xx or 4.xx output for GNSS receiver \
+development lab use. Not a signal generation or RF transmission tool."""
 depends = "$auto"
 section = "science"
 priority = "optional"
@@ -36,6 +39,12 @@ assets = [
 ]
 
 [package.metadata.generate-rpm]
+# Keep in sync with package.version above on a pre-release: RPM's version
+# field forbids "-" (reserved as the name-version-release separator), so a
+# SemVer pre-release like "0.2.0-rc.1" needs "-" replaced by RPM's own
+# "~" pre-release marker here. Not needed for a plain "X.Y.Z" release with
+# no "-" — remove this line then.
+version = "0.2.0~rc.1"
 assets = [
     { source = "target/release/rinexfetch", dest = "/usr/bin/rinexfetch", mode = "755" },
     { source = "README.md", dest = "/usr/share/doc/rinexfetch/README.md", mode = "644", doc = true },

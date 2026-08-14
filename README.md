@@ -13,13 +13,16 @@ retrieves and reformats existing RINEX products.
 
 ## Status
 
-Pre-alpha, under active development. Both the combined nav pipeline and
-per-station obs fetching work end-to-end: auth, `--time latest`/explicit-date
-resolution, product discovery (nav's final/rapid fallback; obs has no tier
-concept), download, filtering, and RINEX 3.xx/4.xx output, with per-station
-error isolation for obs. See
+Beta (`0.2.0-rc.1`). Both the combined nav pipeline and per-station obs
+fetching work end-to-end: auth, `--time latest`/explicit-date resolution,
+product discovery (nav's final/rapid fallback; obs has no tier concept),
+download, filtering, RINEX 3.xx/4.xx output, and per-station error
+isolation for obs, with the resulting binaries and packages built and
+tested for Linux, macOS, and Windows. See
 [`rinexfetch-project-plan.md`](rinexfetch-project-plan.md) for the full
 design and the phased development plan; the sections below summarize it.
+Not yet done: retry/backoff hardening and a station-database lookup for
+legacy 4-character station IDs (Phases 6-7 of the plan).
 
 ## What it does
 
@@ -278,7 +281,11 @@ verifies the tag matches the `Cargo.toml` version, re-runs the test suite on
 each platform, builds release binaries for Linux (`x86_64`), macOS
 (`arm64` and `x86_64`), and Windows (`x86_64`), packages them as
 `.deb`/`.rpm`/`.pkg`/`.msi` plus a tarball/zip per platform, and publishes
-everything to a GitHub release with a `SHA256SUMS` file.
+everything to a GitHub release with a `SHA256SUMS` file. A tag with a
+SemVer pre-release identifier (e.g. `v0.2.0-rc.1`) is published as a
+GitHub pre-release rather than "Latest". Note `cargo-wix`'s MSI packaging
+requires a pre-release identifier to be numeric or dot-separated (`rc.1`,
+not `rc1`) to derive a valid Windows `ProductVersion`.
 
 ## License
 
