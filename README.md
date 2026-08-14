@@ -13,16 +13,18 @@ retrieves and reformats existing RINEX products.
 
 ## Status
 
-Beta (`0.3.0-rc.2`). Both the combined nav pipeline and per-station obs
-fetching work end-to-end: auth, `--time latest`/explicit-date resolution,
-product discovery (nav's final/rapid fallback; obs has no tier concept),
-download, filtering, RINEX 3.xx/4.xx output, and per-station error
-isolation for obs, with the resulting binaries and packages built and
-tested for Linux, macOS, and Windows. See
+`1.0.0`. Both the combined nav pipeline and per-station obs fetching work
+end-to-end: auth, `--time latest`/explicit-date resolution, product
+discovery (nav's final/rapid fallback; obs has no tier concept), download,
+filtering, RINEX 3.xx/4.xx output, and per-station error isolation for
+obs, with the resulting binaries and packages built and tested for Linux,
+macOS, and Windows. See
 [`rinexfetch-project-plan.md`](rinexfetch-project-plan.md) for the full
 design and the phased development plan; the sections below summarize it.
-Not yet done: retry/backoff hardening and a station-database lookup for
-legacy 4-character station IDs (Phases 6-7 of the plan).
+See [`CHANGELOG.md`](CHANGELOG.md) for what changed in each release. Not
+yet done: retry/backoff hardening (Phase 6 of the plan) and a
+station-database lookup for legacy 4-character station IDs (deferred past
+v1, see the plan's Open Questions section).
 
 ## What it does
 

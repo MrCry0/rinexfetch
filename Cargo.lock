@@ -2070,7 +2070,7 @@ dependencies = [
 
 [[package]]
 name = "rinexfetch"
-version = "0.3.0-rc.2"
+version = "1.0.0"
 dependencies = [
  "clap",
  "flate2",
