@@ -71,18 +71,33 @@ jobs:
         if: always()
         shell: bash
         run: |
+          if [ -f nextest-output.txt ]; then
+            summary_line=$(grep -m1 '^ *Summary' nextest-output.txt || echo 'no summary line found; see full output below')
+          else
+            summary_line='no output captured; an earlier step (build or nextest install) likely failed'
+          fi
           {
-            echo "## Test results (${{ matrix.os }})"
-            echo
-            grep '^ *Summary' nextest-output.txt || echo '(no summary line found; see full output below)'
+            echo "## Test results (${{ matrix.os }}): $summary_line"
             echo
             echo '<details><summary>Full test output</summary>'
             echo
             echo '```text'
-            cat nextest-output.txt
+            if [ -f nextest-output.txt ]; then
+              cat nextest-output.txt
+            else
+              echo '(nextest-output.txt not found)'
+            fi
             echo '```'
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nextest-output-${{ matrix.os }}
+          path: nextest-output.txt
+          if-no-files-found: warn
 
   package:
     name: Package (${{ matrix.kind }})
