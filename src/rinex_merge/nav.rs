@@ -3,6 +3,7 @@
 //! downloading, decompressing, filtering by requested system, upconverting
 //! to RINEX 4.xx if needed, and writing the result.
 
+use std::fs;
 use std::io::{BufReader, Cursor, Read};
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -44,6 +45,8 @@ pub enum NavError {
     UnsupportedDownconversion,
     #[error("internal error while parsing/writing this candidate: {0}")]
     Panicked(String),
+    #[error("failed to repair nav output formatting: {0}")]
+    Repair(std::io::Error),
 }
 
 #[derive(Debug)]
@@ -181,6 +184,93 @@ fn write_filtered_nav(
         }
         return Err(err.into());
     }
+    repair_negative_field_indent(&output_path)?;
 
     Ok((output_path, dropped_non_ephemeris))
+}
+
+/// Repairs a formatting bug in the `rinex` crate's (0.22) ephemeris writer:
+/// each continuation line's first orbit value is written as a hardcoded
+/// 3-space indent followed by the value itself, relying on the value's own
+/// formatter to contribute a leading blank for the sign column. That
+/// formatter only emits the blank for non-negative values; for a negative
+/// value the sign character fills the column instead, so the line ends up
+/// one column short. Since RINEX is a fixed-width format, this desyncs any
+/// reader that locates fields by column offset (the standard approach),
+/// corrupting a large fraction of the orbit data in practice. This does not
+/// affect record header lines, only continuation lines, so it's repaired
+/// here by restoring the missing space rather than left for every consumer
+/// of this tool's output to work around.
+fn repair_negative_field_indent(path: &Path) -> Result<(), NavError> {
+    let contents = fs::read_to_string(path).map_err(NavError::Repair)?;
+    let mut in_header = true;
+    let mut repaired = String::with_capacity(contents.len() + 4096);
+
+    for line in contents.lines() {
+        if in_header {
+            repaired.push_str(line);
+            repaired.push('\n');
+            if line.contains("END OF HEADER") {
+                in_header = false;
+            }
+            continue;
+        }
+
+        if line.starts_with("   -") {
+            repaired.push(' ');
+        }
+        repaired.push_str(line);
+        repaired.push('\n');
+    }
+
+    fs::write(path, repaired).map_err(NavError::Repair)
+}
+
+#[cfg(test)]
+mod repair_tests {
+    use super::*;
+
+    #[test]
+    fn restores_missing_indent_on_negative_leading_fields() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("rinexfetch-repair-test.rnx");
+        let contents = "\
+     3.04           NAVIGATION DATA     M                   RINEX VERSION / TYPE
+                                                            END OF HEADER
+G01 2026 08 30 00 00 00 4.355139099060E-04 4.888534022030E-12 0.000000000000E+00
+   -7.500000000000E+01 8.459375000000E+01 4.528760069610E-09 1.996889907620E+00
+    4.276633262630E-06 2.312970813360E-03 1.014396548270E-05 5.153566638950E+03
+";
+        fs::write(&path, contents).unwrap();
+
+        repair_negative_field_indent(&path).unwrap();
+
+        let repaired = fs::read_to_string(&path).unwrap();
+        for line in repaired.lines() {
+            assert!(!line.starts_with("   -"), "still malformed: {line:?}");
+        }
+        assert!(repaired.contains("    -7.500000000000E+01"));
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn leaves_well_formed_lines_untouched() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("rinexfetch-repair-test-ok.rnx");
+        let contents = "\
+     3.04           NAVIGATION DATA     M                   RINEX VERSION / TYPE
+                                                            END OF HEADER
+G01 2026 08 30 00 00 00 4.355139099060E-04 4.888534022030E-12 0.000000000000E+00
+    7.500000000000E+01 8.459375000000E+01 4.528760069610E-09 1.996889907620E+00
+";
+        fs::write(&path, contents).unwrap();
+
+        repair_negative_field_indent(&path).unwrap();
+
+        let repaired = fs::read_to_string(&path).unwrap();
+        assert_eq!(repaired, contents);
+
+        fs::remove_file(&path).unwrap();
+    }
 }
