@@ -25,3 +25,21 @@ pub(crate) fn convert_version(header: Header, target_major: u8) -> Header {
     let target_minor = if target_major >= 4 { 0 } else { 5 };
     header.with_version(Version::new(target_major, target_minor))
 }
+
+/// Extracts a human-readable message from a caught panic payload, which is
+/// typically a `&str` or `String` (from `panic!`/`.expect()`/etc.) but
+/// isn't guaranteed to be either. Shared by nav and obs, since both wrap
+/// the `rinex` crate's parse/write calls in `catch_unwind`: that crate
+/// runs on untrusted, externally-controlled CDDIS content and has been
+/// observed to panic (not just return `Err`) on certain malformed input,
+/// in both the nav parser and the Hatanaka (CRINEX) decompressor used for
+/// obs.
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        message.to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}

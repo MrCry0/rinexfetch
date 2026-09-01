@@ -101,7 +101,11 @@ pub fn fetch_and_write(
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
             write_filtered_nav(&gzip_bytes, systems, target_version_major, output_dir)
         }))
-        .unwrap_or_else(|payload| Err(NavError::Panicked(panic_message(&payload))));
+        .unwrap_or_else(|payload| {
+            Err(NavError::Panicked(crate::rinex_merge::panic_message(
+                &payload,
+            )))
+        });
 
         match result {
             Ok((output_path, dropped_non_ephemeris)) => {
@@ -130,19 +134,6 @@ pub fn fetch_and_write(
         tried: candidates.len(),
         malformed,
     })
-}
-
-/// Extracts a human-readable message from a caught panic payload, which is
-/// typically a `&str` or `String` (from `panic!`/`.expect()`/etc.) but
-/// isn't guaranteed to be either.
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        message.to_string()
-    } else if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else {
-        "non-string panic payload".to_string()
-    }
 }
 
 fn write_filtered_nav(
