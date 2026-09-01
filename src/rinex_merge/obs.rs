@@ -6,6 +6,7 @@
 //! §8).
 
 use std::io::{BufReader, Cursor, Read};
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
@@ -39,6 +40,8 @@ pub enum ObsError {
     Write(#[from] rinex::prelude::FormattingError),
     #[error("downloaded product is not an observation RINEX file")]
     UnexpectedRecordType,
+    #[error("internal error while parsing/writing this station's data: {0}")]
+    Panicked(String),
 }
 
 #[derive(Debug)]
@@ -97,6 +100,29 @@ fn fetch_and_write_one(
     let mut decompressed = Vec::new();
     GzDecoder::new(gzip_bytes.as_slice()).read_to_end(&mut decompressed)?;
 
+    // The `rinex` crate runs on untrusted, externally-controlled CDDIS
+    // content here too (compact RINEX/Hatanaka decompression is not just
+    // a parse — it's numeric differencing over the file's own data, which
+    // has been observed to panic via integer overflow on real published
+    // obs files rather than returning `Err`), so this call is wrapped in
+    // `catch_unwind` the same way the nav path already is: a crate panic
+    // on one station's data shouldn't take down the whole run.
+    panic::catch_unwind(AssertUnwindSafe(|| {
+        write_filtered_obs(decompressed, systems, target_version_major, output_dir)
+    }))
+    .unwrap_or_else(|payload| {
+        Err(ObsError::Panicked(crate::rinex_merge::panic_message(
+            &payload,
+        )))
+    })
+}
+
+fn write_filtered_obs(
+    decompressed: Vec<u8>,
+    systems: &[GnssSystem],
+    target_version_major: u8,
+    output_dir: &Path,
+) -> Result<PathBuf, ObsError> {
     let mut rinex = Rinex::parse(&mut BufReader::new(Cursor::new(decompressed)))?;
 
     let obs = rinex
