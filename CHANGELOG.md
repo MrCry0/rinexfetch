@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] - 2026-09-08
+
+### Fixed
+
+- Nav output could contain malformed continuation lines (a rinex
+  crate formatting bug) that desynced any consumer locating fields by
+  column offset, corrupting a large fraction of the orbit data in
+  practice.
+- The obs pipeline could crash the whole run on a single station's
+  data: the rinex crate's CRINEX (Hatanaka) decompressor could
+  overflow decompressing certain real, valid receiver-clock offset
+  sequences. Per-station panic isolation was added so one station's
+  bad input can no longer take down the rest of the run or the nav
+  fetch.
+- Pinned the rinex dependency to a fork carrying upstream-pending
+  fixes for defects found while testing against the live archive:
+  the receiver-clock decompression overflow above (root cause, not
+  just isolation), a nav writer that omitted every ephemeris
+  record's clock and orbital fields, GPS-only RINEX 4 to 3 nav
+  downconversion being blocked even where a valid RINEX 3
+  representation exists, the obs receiver clock offset never being
+  written to output, and RINEX 4.02 (used by CDDIS's rapid nav tier)
+  being rejected outright. This is a temporary measure until the
+  fixes land in a published rinex release.
+
 ## [1.0.1] - 2026-08-14
 
 ### Changed
