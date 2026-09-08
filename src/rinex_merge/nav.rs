@@ -169,7 +169,8 @@ fn write_filtered_nav(
     if let Err(err) = rinex.to_file(&output_path) {
         if matches!(
             err,
-            rinex::prelude::FormattingError::MissingNavigationStandards
+            rinex::prelude::FormattingError::NoNavigationDefinition
+                | rinex::prelude::FormattingError::MissingNavigationStandards
         ) {
             return Err(NavError::UnsupportedDownconversion);
         }

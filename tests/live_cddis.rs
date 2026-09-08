@@ -5,13 +5,42 @@
 //! real bearer token in `RINEXFETCH_TEST_TOKEN`.
 
 use std::fs;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 
 use rinexfetch::cddis::auth::{CddisAuthError, CddisClient};
 use rinexfetch::cddis::discovery::{self, NavTier};
-use rinexfetch::rinex_merge::nav::{self, NavError};
+use rinexfetch::rinex_merge::nav;
 use rinexfetch::rinex_merge::obs;
 use rinexfetch::systems::{ALL_SYSTEMS, GnssSystem};
 use rinexfetch::time::GpsDay;
+
+/// Creates `std::env::temp_dir()/name` and removes it on drop. Most of
+/// these tests end with an assertion, and a plain `fs::remove_dir_all` at
+/// the end of the function body is skipped whenever an earlier assertion
+/// fails/panics — this makes cleanup unconditional instead.
+struct TestOutputDir(PathBuf);
+
+impl TestOutputDir {
+    fn new(name: &str) -> Self {
+        let path = std::env::temp_dir().join(name);
+        fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+}
+
+impl Deref for TestOutputDir {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestOutputDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 
 #[test]
 #[ignore = "hits the live CDDIS archive"]
@@ -43,8 +72,7 @@ fn real_final_nav_product_downloads_filters_and_upconverts() {
     let day = GpsDay::resolve("2026-08-01").unwrap();
     let candidates = discovery::nav_candidates_for_day(day);
 
-    let output_dir = std::env::temp_dir().join("rinexfetch-live-test-nav");
-    fs::create_dir_all(&output_dir).unwrap();
+    let output_dir = TestOutputDir::new("rinexfetch-live-test-nav");
 
     let outcome = nav::fetch_and_write(&client, &candidates, &ALL_SYSTEMS, 4, &output_dir)
         .expect("fetch_and_write should succeed against a real, settled day");
@@ -60,8 +88,6 @@ fn real_final_nav_product_downloads_filters_and_upconverts() {
         written.record.as_nav().is_some_and(|nav| !nav.is_empty()),
         "filtered nav record should not be empty for --systems all"
     );
-
-    fs::remove_dir_all(&output_dir).ok();
 }
 
 #[test]
@@ -77,8 +103,7 @@ fn real_final_nav_product_passes_through_at_rinex3() {
     let day = GpsDay::resolve("2026-08-01").unwrap();
     let candidates = discovery::nav_candidates_for_day(day);
 
-    let output_dir = std::env::temp_dir().join("rinexfetch-live-test-nav-v3-passthrough");
-    fs::create_dir_all(&output_dir).unwrap();
+    let output_dir = TestOutputDir::new("rinexfetch-live-test-nav-v3-passthrough");
 
     let outcome = nav::fetch_and_write(&client, &candidates, &ALL_SYSTEMS, 3, &output_dir)
         .expect("same-version (3 -> 3) passthrough should always succeed");
@@ -86,13 +111,11 @@ fn real_final_nav_product_passes_through_at_rinex3() {
     let written = rinex::prelude::Rinex::from_file(&outcome.output_path)
         .expect("written output should itself be valid RINEX");
     assert_eq!(written.header.version.major, 3);
-
-    fs::remove_dir_all(&output_dir).ok();
 }
 
 #[test]
 #[ignore = "hits the live CDDIS archive; needs RINEXFETCH_TEST_TOKEN"]
-fn real_rapid_nav_product_cannot_downconvert_to_rinex3() {
+fn real_rapid_nav_downconverts_gps_ephemeris_to_rinex3() {
     let token = std::env::var("RINEXFETCH_TEST_TOKEN")
         .expect("set RINEXFETCH_TEST_TOKEN to a real URS bearer token to run this test");
     let client = CddisClient::new(token).unwrap();
@@ -107,20 +130,35 @@ fn real_rapid_nav_product_cannot_downconvert_to_rinex3() {
         .collect();
     assert_eq!(candidates.len(), 1);
 
-    let output_dir = std::env::temp_dir().join("rinexfetch-live-test-nav-v3-downconvert");
-    fs::create_dir_all(&output_dir).unwrap();
+    let output_dir = TestOutputDir::new("rinexfetch-live-test-nav-v3-downconvert");
 
-    // Confirmed against the live archive: the rinex crate cannot represent
-    // a RINEX-4-tagged nav message (BRD400DLR explicitly tags a
-    // NavMessageType per record) back in RINEX 3, for any constellation
-    // tried (all systems and GPS-only both hit the same limitation). This
-    // is a real domain/crate limitation, not a bug in rinexfetch: v1
-    // detects it via NavError::UnsupportedDownconversion rather than
-    // silently writing a broken or incomplete file.
-    let outcome = nav::fetch_and_write(&client, &candidates, &[GnssSystem::Gps], 3, &output_dir);
-    assert!(matches!(outcome, Err(NavError::UnsupportedDownconversion)));
+    // GPS-only downconversion of a RINEX-4-tagged nav product to RINEX 3
+    // used to be impossible (rinex 0.22.0 returned
+    // NavError::UnsupportedDownconversion unconditionally, for every
+    // constellation tried, GPS included). That's since been fixed: GPS
+    // LNAV ephemeris has a real RINEX 3 representation, so it's now
+    // written out correctly, rather than either failing outright or
+    // (an intermediate, worse regression seen along the way) silently
+    // reporting success while writing data-free, unparseable output.
+    // Confirmed here by checking real orbital field content, not just
+    // that the call returned Ok.
+    let outcome = nav::fetch_and_write(&client, &candidates, &[GnssSystem::Gps], 3, &output_dir)
+        .expect("GPS-only downconversion to RINEX 3 should succeed now");
 
-    fs::remove_dir_all(&output_dir).ok();
+    let written = rinex::prelude::Rinex::from_file(&outcome.output_path)
+        .expect("written output should itself be valid RINEX");
+    assert_eq!(written.header.version.major, 3);
+    let nav = written
+        .record
+        .as_nav()
+        .expect("filtered record should still be a nav record");
+    assert!(!nav.is_empty(), "GPS ephemeris should not be empty");
+    assert!(
+        nav.values().any(|frame| frame
+            .as_ephemeris()
+            .is_some_and(|eph| eph.get_orbit_f64("sqrta").is_some_and(|a| a > 1000.0))),
+        "at least one ephemeris should carry a real sqrt(A) orbital parameter, not just an epoch"
+    );
 }
 
 #[test]
@@ -131,8 +169,7 @@ fn real_obs_product_downloads_and_writes_for_known_station() {
     let client = CddisClient::new(token).unwrap();
 
     let day = GpsDay::resolve("2026-08-01").unwrap();
-    let output_dir = std::env::temp_dir().join("rinexfetch-live-test-obs");
-    fs::create_dir_all(&output_dir).unwrap();
+    let output_dir = TestOutputDir::new("rinexfetch-live-test-obs");
 
     let outcomes = obs::fetch_and_write_all(
         &client,
@@ -157,8 +194,61 @@ fn real_obs_product_downloads_and_writes_for_known_station() {
         written.record.as_obs().is_some_and(|obs| !obs.is_empty()),
         "filtered obs record should not be empty for --systems all"
     );
+}
 
-    fs::remove_dir_all(&output_dir).ok();
+#[test]
+#[ignore = "hits the live CDDIS archive; needs RINEXFETCH_TEST_TOKEN"]
+fn real_obs_decompresses_previously_overflowing_clock_data() {
+    let token = std::env::var("RINEXFETCH_TEST_TOKEN")
+        .expect("set RINEXFETCH_TEST_TOKEN to a real URS bearer token to run this test");
+    let client = CddisClient::new(token).unwrap();
+
+    // Regression test for a real bug (2026-09-02): the rinex crate's
+    // receiver-clock CRINEX (Hatanaka) decompressor hit a genuine i64
+    // overflow on this station's real, uncorrupted clock-offset sequence
+    // for this day (verified directly against the raw decompressed bytes,
+    // independent of this crate's own error handling, before concluding
+    // it was a crate defect rather than corrupted CDDIS content). Also
+    // reported independently upstream against a different station's data
+    // (nav-solutions/rinex#426) and root-caused to an off-by-one in
+    // NumDiff::rotate_history that left the oldest history slot frozen at
+    // its initial value.
+    //
+    // Now that the fix is pinned, this station's data must decompress
+    // successfully with real observation content rather than merely "not
+    // panic" — asserting panic-isolation alone would have made this test
+    // pass again the moment the crate reverted to producing silently
+    // wrong (wrapped, not overflowed) values in a release build instead
+    // of panicking, which is the failure mode `panic::catch_unwind` can't
+    // catch at all. Note: this station's decompressed output currently
+    // has no receiver-clock field populated in the parsed record (a
+    // separate, unrelated gap from the overflow fix), so this checks the
+    // signal data that is populated rather than the clock offset itself.
+    let day = GpsDay::resolve("2026-08-31").unwrap();
+    let output_dir = TestOutputDir::new("rinexfetch-live-test-obs-clock-overflow-fix");
+
+    let outcomes = obs::fetch_and_write_all(
+        &client,
+        day,
+        &["GLSV00UKR".to_string()],
+        &ALL_SYSTEMS,
+        3,
+        &output_dir,
+    );
+
+    assert_eq!(outcomes.len(), 1);
+    let output_path = outcomes[0]
+        .result
+        .as_ref()
+        .unwrap_or_else(|err| panic!("GLSV00UKR should decompress successfully now: {err}"))
+        .clone();
+
+    let written = rinex::prelude::Rinex::from_file(&output_path)
+        .expect("written output should itself be valid RINEX");
+    assert!(
+        written.record.as_obs().is_some_and(|obs| !obs.is_empty()),
+        "filtered obs record should not be empty for --systems all"
+    );
 }
 
 #[test]
@@ -169,8 +259,7 @@ fn real_obs_unknown_station_is_isolated_from_others() {
     let client = CddisClient::new(token).unwrap();
 
     let day = GpsDay::resolve("2026-08-01").unwrap();
-    let output_dir = std::env::temp_dir().join("rinexfetch-live-test-obs-isolation");
-    fs::create_dir_all(&output_dir).unwrap();
+    let output_dir = TestOutputDir::new("rinexfetch-live-test-obs-isolation");
 
     // A well-formed but bogus 9-character station ID mixed with a real
     // one: the bogus one should fail in isolation (404 from CDDIS -> not
@@ -195,8 +284,6 @@ fn real_obs_unknown_station_is_isolated_from_others() {
         "real station should still succeed despite the other one failing: {:?}",
         outcomes[1].result
     );
-
-    fs::remove_dir_all(&output_dir).ok();
 }
 
 #[test]
@@ -207,8 +294,7 @@ fn real_obs_product_at_rinex3() {
     let client = CddisClient::new(token).unwrap();
 
     let day = GpsDay::resolve("2026-08-01").unwrap();
-    let output_dir = std::env::temp_dir().join("rinexfetch-live-test-obs-v3");
-    fs::create_dir_all(&output_dir).unwrap();
+    let output_dir = TestOutputDir::new("rinexfetch-live-test-obs-v3");
 
     let outcomes = obs::fetch_and_write_all(
         &client,
@@ -220,9 +306,11 @@ fn real_obs_product_at_rinex3() {
     );
 
     assert_eq!(outcomes.len(), 1);
-    // Plan §12 flags obs version-conversion edge cases as needing
-    // validation against real station data; this documents the actual
-    // outcome rather than assuming it works.
+    // Plan §12 flagged obs version-conversion as an edge case needing
+    // validation against real station data; unlike nav's 4->3
+    // downconversion, there's no known domain reason for obs conversion
+    // to fail, so this asserts success rather than merely observing
+    // whatever happens.
     match &outcomes[0].result {
         Ok(path) => {
             let written = rinex::prelude::Rinex::from_file(path)
@@ -231,8 +319,6 @@ fn real_obs_product_at_rinex3() {
         }
         Err(err) => panic!("--rinex-version 3 obs conversion failed: {err}"),
     }
-
-    fs::remove_dir_all(&output_dir).ok();
 }
 
 #[test]
@@ -252,8 +338,7 @@ fn real_latest_nav_survives_a_malformed_candidate() {
     let anchor = GpsDay::resolve("latest").unwrap();
     let candidates = discovery::nav_candidates_for_latest(anchor);
 
-    let output_dir = std::env::temp_dir().join("rinexfetch-live-test-nav-latest");
-    fs::create_dir_all(&output_dir).unwrap();
+    let output_dir = TestOutputDir::new("rinexfetch-live-test-nav-latest");
 
     let outcome = nav::fetch_and_write(&client, &candidates, &ALL_SYSTEMS, 4, &output_dir)
         .expect("--time latest should succeed even if some candidate along the way is malformed");
@@ -284,6 +369,4 @@ fn real_latest_nav_survives_a_malformed_candidate() {
              (known Klobuchar round-trip bug) — not asserting on it further"
         ),
     }
-
-    fs::remove_dir_all(&output_dir).ok();
 }
