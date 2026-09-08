@@ -40,7 +40,12 @@ pub enum ObsError {
     Write(#[from] rinex::prelude::FormattingError),
     #[error("downloaded product is not an observation RINEX file")]
     UnexpectedRecordType,
-    #[error("internal error while parsing/writing this station's data: {0}")]
+    #[error(
+        "the rinex crate panicked while decompressing this station's CRINEX data \
+         (raw panic message: {0}); this is a defect inside that third-party crate, \
+         not a problem with this station's request, and no output was written for \
+         this station"
+    )]
     Panicked(String),
 }
 
@@ -102,11 +107,23 @@ fn fetch_and_write_one(
 
     // The `rinex` crate runs on untrusted, externally-controlled CDDIS
     // content here too (compact RINEX/Hatanaka decompression is not just
-    // a parse — it's numeric differencing over the file's own data, which
-    // has been observed to panic via integer overflow on real published
-    // obs files rather than returning `Err`), so this call is wrapped in
-    // `catch_unwind` the same way the nav path already is: a crate panic
-    // on one station's data shouldn't take down the whole run.
+    // a parse — it's numeric differencing over the file's own data), so
+    // this call is wrapped in `catch_unwind` the same way the nav path
+    // already is: a crate panic on one station's data shouldn't take
+    // down the whole run.
+    //
+    // This isolation was originally added for a specific, now-fixed
+    // defect: the crate's receiver-clock decompressor
+    // (NumDiff::decompress, called from DecompressorExpert::run_clock)
+    // hit a genuine i64 overflow on real, uncorrupted clock-offset data
+    // (station GLSV00UKR, day 2026-243), root-caused to an off-by-one in
+    // NumDiff::rotate_history that left the oldest history slot frozen at
+    // its initial value instead of rotating it — reported upstream as
+    // nav-solutions/rinex#426 and fixed in the pinned commit this
+    // dependency now points at. The isolation stays regardless: it's
+    // cheap, and a third-party parser panicking on attacker-uncontrolled
+    // but not rinexfetch-controlled input is exactly the situation it
+    // exists for, independent of any one bug.
     panic::catch_unwind(AssertUnwindSafe(|| {
         write_filtered_obs(decompressed, systems, target_version_major, output_dir)
     }))
