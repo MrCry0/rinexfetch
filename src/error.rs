@@ -1,8 +1,8 @@
 //! Structured, top-level error type for `rinexfetch`.
 //!
 //! Per the project plan (§8 Reliability Considerations), failures must be
-//! classified rather than surfaced as opaque errors, so lab operators can
-//! tell an auth failure apart from a not-yet-published product, a network
+//! classified rather than surfaced as opaque errors, so a caller can tell
+//! an auth failure apart from a not-yet-published product, a network
 //! error, an unknown station, or a parse/format problem. Module-specific
 //! error types convert into this one via `#[from]` as each phase lands.
 
