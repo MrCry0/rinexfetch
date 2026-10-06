@@ -207,4 +207,39 @@ mod tests {
         }
         assert!(written.contains("    -5.010515451431E-06"));
     }
+
+    /// 12 satellites across all seven constellations, cut from a real
+    /// DLR combined nav file.
+    const MULTI_GNSS: &str = include_str!("../../tests/fixtures/nav3_dlr_multi_gnss.rnx");
+
+    fn gzip(text: &str) -> Vec<u8> {
+        let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+        gz.write_all(text.as_bytes()).unwrap();
+        gz.finish().unwrap()
+    }
+
+    fn ephemeris_count(path: &Path) -> usize {
+        let rinex = Rinex::from_file(path).unwrap();
+        rinex.record.as_nav().unwrap().len()
+    }
+
+    #[test]
+    fn multi_gnss_fixture_keeps_every_frame_at_both_versions() {
+        let systems = crate::systems::parse_systems("all").unwrap();
+        let bytes = gzip(MULTI_GNSS);
+        let dir = std::env::temp_dir().join("rinexfetch-nav-multi-test");
+        fs::create_dir_all(&dir).unwrap();
+
+        let source = Rinex::parse(&mut BufReader::new(Cursor::new(MULTI_GNSS))).unwrap();
+        let nav = source.record.as_nav().unwrap();
+        assert_eq!(nav.len(), 48);
+        let expected = nav.len();
+
+        for major in [3u8, 4] {
+            let (path, _) = write_filtered_nav(&bytes, &systems, major, &dir).unwrap();
+            let written = ephemeris_count(&path);
+            fs::remove_file(&path).unwrap();
+            assert_eq!(written, expected, "RINEX {major} output lost frames");
+        }
+    }
 }
