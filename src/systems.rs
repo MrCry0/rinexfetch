@@ -14,6 +14,7 @@ pub enum GnssSystem {
     Beidou,
     Qzss,
     Sbas,
+    Irnss,
 }
 
 impl fmt::Display for GnssSystem {
@@ -25,6 +26,7 @@ impl fmt::Display for GnssSystem {
             GnssSystem::Beidou => "beidou",
             GnssSystem::Qzss => "qzss",
             GnssSystem::Sbas => "sbas",
+            GnssSystem::Irnss => "irnss",
         };
         f.write_str(name)
     }
@@ -41,24 +43,26 @@ impl FromStr for GnssSystem {
             "beidou" => Ok(GnssSystem::Beidou),
             "qzss" => Ok(GnssSystem::Qzss),
             "sbas" => Ok(GnssSystem::Sbas),
+            "irnss" => Ok(GnssSystem::Irnss),
             other => Err(format!(
-                "unknown GNSS system {other:?} (expected one of: all, gps, glonass, galileo, beidou, qzss, sbas)"
+                "unknown GNSS system {other:?} (expected one of: all, gps, glonass, galileo, beidou, qzss, sbas, irnss)"
             )),
         }
     }
 }
 
-pub const ALL_SYSTEMS: [GnssSystem; 6] = [
+pub const ALL_SYSTEMS: [GnssSystem; 7] = [
     GnssSystem::Gps,
     GnssSystem::Glonass,
     GnssSystem::Galileo,
     GnssSystem::Beidou,
     GnssSystem::Qzss,
     GnssSystem::Sbas,
+    GnssSystem::Irnss,
 ];
 
 /// Parses a `--systems` value: either `all`, or a comma-separated subset of
-/// `gps,glonass,galileo,beidou,qzss,sbas`.
+/// `gps,glonass,galileo,beidou,qzss,sbas,irnss`.
 pub fn parse_systems(raw: &str) -> Result<Vec<GnssSystem>, String> {
     if raw.trim().eq_ignore_ascii_case("all") {
         return Ok(ALL_SYSTEMS.to_vec());
@@ -80,6 +84,7 @@ pub fn matches_constellation(system: GnssSystem, constellation: Constellation) -
         GnssSystem::Beidou => constellation == Constellation::BeiDou,
         GnssSystem::Qzss => constellation == Constellation::QZSS,
         GnssSystem::Sbas => constellation.is_sbas(),
+        GnssSystem::Irnss => constellation == Constellation::IRNSS,
     }
 }
 
@@ -113,6 +118,19 @@ mod tests {
             GnssSystem::Gps,
             Constellation::Glonass
         ));
+    }
+
+    #[test]
+    fn irnss_matches_only_irnss() {
+        assert!(matches_constellation(
+            GnssSystem::Irnss,
+            Constellation::IRNSS
+        ));
+        assert!(!matches_constellation(
+            GnssSystem::Irnss,
+            Constellation::GPS
+        ));
+        assert_eq!(parse_systems("irnss").unwrap(), vec![GnssSystem::Irnss]);
     }
 
     #[test]

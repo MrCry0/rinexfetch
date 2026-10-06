@@ -119,8 +119,7 @@ fn fetch_and_write_one(
     // (station GLSV00UKR, day 2026-243), root-caused to an off-by-one in
     // NumDiff::rotate_history that left the oldest history slot frozen at
     // its initial value instead of rotating it — reported upstream as
-    // nav-solutions/rinex#426 and fixed in the pinned commit this
-    // dependency now points at. The isolation stays regardless: it's
+    // nav-solutions/rinex#426 and fixed in rinex 0.23. The isolation stays regardless: it's
     // cheap, and a third-party parser panicking on attacker-uncontrolled
     // but not rinexfetch-controlled input is exactly the situation it
     // exists for, independent of any one bug.
@@ -174,6 +173,7 @@ fn write_filtered_obs(
 mod tests {
     use super::*;
     use crate::systems::ALL_SYSTEMS;
+    use std::fs;
 
     #[test]
     fn invalid_station_ids_are_isolated_and_never_hit_the_network() {
@@ -204,5 +204,36 @@ mod tests {
             outcomes[1].result,
             Err(ObsError::InvalidStationId(StationIdError::InvalidFormat(_)))
         ));
+    }
+
+    /// First 20 epochs of a real WTZR00DEU daily CRINEX 3.0 file, cut at
+    /// an epoch boundary so it is itself a valid CRINEX prefix.
+    const WTZR_CRX: &str = include_str!("../../tests/fixtures/obs3_wtzr_20epochs.crx");
+
+    fn signal_count(rinex: &Rinex) -> (usize, usize) {
+        let obs = rinex.record.as_obs().unwrap();
+        let signals = obs.values().map(|o| o.signals.len()).sum();
+        let clocks = obs.values().filter(|o| o.clock.is_some()).count();
+        (signals, clocks)
+    }
+
+    #[test]
+    fn wtzr_crinex_fixture_keeps_every_epoch_and_signal() {
+        let source = Rinex::parse(&mut BufReader::new(Cursor::new(WTZR_CRX.as_bytes()))).unwrap();
+        let (src_signals, src_clocks) = signal_count(&source);
+        assert_eq!(source.record.as_obs().unwrap().len(), 20);
+
+        let systems = crate::systems::parse_systems("all").unwrap();
+        let dir = std::env::temp_dir().join("rinexfetch-obs-wtzr-test");
+        fs::create_dir_all(&dir).unwrap();
+
+        for major in [3u8, 4] {
+            let path =
+                write_filtered_obs(WTZR_CRX.as_bytes().to_vec(), &systems, major, &dir).unwrap();
+            let written = Rinex::from_file(&path).unwrap();
+            fs::remove_file(&path).unwrap();
+            assert_eq!(written.record.as_obs().unwrap().len(), 20);
+            assert_eq!(signal_count(&written), (src_signals, src_clocks));
+        }
     }
 }
