@@ -31,7 +31,7 @@ v1, see the plan's Open Questions section).
 
 - Fetches a combined multi-GNSS **broadcast navigation (nav)** file for a
   given time, containing ephemerides for the requested constellation(s)
-  (GPS / GLONASS / Galileo / BeiDou / QZSS / SBAS / all).
+  (GPS / GLONASS / Galileo / BeiDou / QZSS / SBAS / IRNSS / all).
 - Optionally fetches per-station **observation (obs)** files for an explicit
   list of ground stations, for the same time and constellation filter.
 - Resolves `latest` or an explicit datetime to the corresponding GPS
@@ -60,7 +60,7 @@ v1, see the plan's Open Questions section).
 
 ```
 rinexfetch --time latest|<ISO8601> \
-           --systems all|gps,glonass,galileo,beidou,qzss,sbas \
+           --systems all|gps,glonass,galileo,beidou,qzss,sbas,irnss \
            --stations WTZR00DEU,ONSA00SWE,... \
            --rinex-version 3|4 \
            --output-dir <path>
@@ -70,7 +70,7 @@ rinexfetch --time latest|<ISO8601> \
   nav product exists (final, falling back to rapid); an ISO 8601 timestamp
   resolves to its corresponding GPS day/session.
 - `--systems` — `all` or a comma-separated subset of `gps`, `glonass`,
-  `galileo`, `beidou`, `qzss`, `sbas`; applied as a filter on both the
+  `galileo`, `beidou`, `qzss`, `sbas`, `irnss`; applied as a filter on both the
   combined nav file and any station obs files.
 - `--stations` — modern 9-character IGS site identifiers only (e.g.
   `WTZR00DEU`); legacy 4-character IDs aren't auto-expanded (no station

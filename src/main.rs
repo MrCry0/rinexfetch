@@ -22,7 +22,7 @@ struct Cli {
     #[arg(long)]
     time: String,
 
-    /// `all` or a comma-separated subset of gps,glonass,galileo,beidou,qzss,sbas.
+    /// `all` or a comma-separated subset of gps,glonass,galileo,beidou,qzss,sbas,irnss.
     #[arg(long, default_value = "all")]
     systems: String,
 
