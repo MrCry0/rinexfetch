@@ -56,9 +56,10 @@ pub struct NavOutcome {
     pub output_path: PathBuf,
     /// Count of non-ephemeris nav frames (system time offset, earth
     /// orientation, ionosphere model — all RINEX-4-only) present in the
-    /// filtered record. The `rinex` crate's nav writer only formats
-    /// ephemeris frames as of 0.22 (silently, for any target version), so
-    /// this is surfaced here rather than left undetected.
+    /// filtered record. The `rinex` crate's nav writer only formatted
+    /// ephemeris frames as of 0.22 (silently, for any target version);
+    /// this has not been re-verified against 0.23, so the count is
+    /// surfaced here rather than left undetected.
     pub dropped_non_ephemeris: usize,
 }
 
