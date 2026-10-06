@@ -2048,7 +2048,8 @@ dependencies = [
 [[package]]
 name = "rinex"
 version = "0.23.0"
-source = "git+https://github.com/MrCry0/rinex?rev=53057b8991ae76022fcfd3cadb432f68999ce784#53057b8991ae76022fcfd3cadb432f68999ce784"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5eb314e4e4426361eb8102af6661aaf9daf6b0f57d9680bba7577a4f4a8b0340"
 dependencies = [
  "bitflags",
  "flate2",

@@ -119,8 +119,7 @@ fn fetch_and_write_one(
     // (station GLSV00UKR, day 2026-243), root-caused to an off-by-one in
     // NumDiff::rotate_history that left the oldest history slot frozen at
     // its initial value instead of rotating it — reported upstream as
-    // nav-solutions/rinex#426 and fixed in the pinned commit this
-    // dependency now points at. The isolation stays regardless: it's
+    // nav-solutions/rinex#426 and fixed in rinex 0.23. The isolation stays regardless: it's
     // cheap, and a third-party parser panicking on attacker-uncontrolled
     // but not rinexfetch-controlled input is exactly the situation it
     // exists for, independent of any one bug.

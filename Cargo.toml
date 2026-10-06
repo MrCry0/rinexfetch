@@ -15,7 +15,7 @@ thiserror = "2.0"
 rpassword = "7.5"
 reqwest = { version = "0.13", features = ["blocking"] }
 keyring = "4.1"
-rinex = { git = "https://github.com/MrCry0/rinex", rev = "53057b8991ae76022fcfd3cadb432f68999ce784" }
+rinex = "0.23"
 flate2 = "1.1"
 
 [package.metadata.deb]
