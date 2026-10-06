@@ -242,4 +242,41 @@ mod tests {
             assert_eq!(written, expected, "RINEX {major} output lost frames");
         }
     }
+
+    /// RINEX 4.02 rapid-tier nav: the first two records of every
+    /// (record type, system, message type) combination in a real DLR
+    /// file, 64 records covering EPH, STO, ION and EOP frames.
+    const RAPID_V4: &str = include_str!("../../tests/fixtures/nav4_dlr_rapid_mixed.rnx");
+
+    #[test]
+    fn rapid_v4_fixture_keeps_every_frame_at_rinex_4() {
+        let systems = crate::systems::parse_systems("all").unwrap();
+        let dir = std::env::temp_dir().join("rinexfetch-nav-rapid-v4-test");
+        fs::create_dir_all(&dir).unwrap();
+
+        let source = Rinex::parse(&mut BufReader::new(Cursor::new(RAPID_V4))).unwrap();
+        // The fixture holds 64 records but the rinex crate parses 60 of
+        // them: it drops both IRNSS system time offset records and keeps
+        // one of each duplicated C06 CNV1/CNV2 pair. Only what the
+        // parser keeps can be checked here.
+        let expected = source.record.as_nav().unwrap().len();
+        assert_eq!(expected, 60);
+
+        let (path, _) = write_filtered_nav(&gzip(RAPID_V4), &systems, 4, &dir).unwrap();
+        let written = ephemeris_count(&path);
+        fs::remove_file(&path).unwrap();
+        assert_eq!(written, expected, "RINEX 4 output lost frames");
+    }
+
+    #[test]
+    fn rapid_v4_fixture_downconverts_to_rinex_3() {
+        let systems = crate::systems::parse_systems("all").unwrap();
+        let dir = std::env::temp_dir().join("rinexfetch-nav-rapid-v3-test");
+        fs::create_dir_all(&dir).unwrap();
+
+        let (path, _) = write_filtered_nav(&gzip(RAPID_V4), &systems, 3, &dir).unwrap();
+        let written = ephemeris_count(&path);
+        fs::remove_file(&path).unwrap();
+        assert!(written > 0, "RINEX 3 output has no frames");
+    }
 }
