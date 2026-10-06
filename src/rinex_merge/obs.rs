@@ -20,6 +20,7 @@ use crate::rinex_merge::convert_version;
 use crate::stations::{self, StationIdError};
 use crate::systems::{GnssSystem, matches_constellation};
 use crate::time::GpsDay;
+use crate::validate::{self, Report};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ObsError {
@@ -53,6 +54,8 @@ pub enum ObsError {
 pub struct StationOutcome {
     pub station: String,
     pub result: Result<PathBuf, ObsError>,
+    /// Layout check of the written file; empty if nothing was written.
+    pub validation: Report,
 }
 
 /// Fetches and writes obs data for every requested station, isolating
@@ -69,18 +72,40 @@ pub fn fetch_and_write_all(
 ) -> Vec<StationOutcome> {
     stations
         .iter()
-        .map(|raw_station| StationOutcome {
-            station: raw_station.clone(),
-            result: fetch_and_write_one(
+        .map(|raw_station| {
+            let result = fetch_and_write_one(
                 client,
                 day,
                 raw_station,
                 systems,
                 target_version_major,
                 output_dir,
-            ),
+            );
+            let validation = match &result {
+                Ok(path) => validate_written(path),
+                Err(_) => Report::new(),
+            };
+            StationOutcome {
+                station: raw_station.clone(),
+                result,
+                validation,
+            }
         })
         .collect()
+}
+
+fn validate_written(path: &Path) -> Report {
+    match std::fs::read_to_string(path) {
+        Ok(text) => validate::obs::check_structure(&text),
+        Err(err) => {
+            let mut report = Report::new();
+            report.error(
+                path.display().to_string(),
+                format!("cannot read back: {err}"),
+            );
+            report
+        }
+    }
 }
 
 fn fetch_and_write_one(
@@ -230,6 +255,8 @@ mod tests {
         for major in [3u8, 4] {
             let path =
                 write_filtered_obs(WTZR_CRX.as_bytes().to_vec(), &systems, major, &dir).unwrap();
+            let report = validate_written(&path);
+            assert!(!report.has_errors(), "RINEX {major}: {:?}", report.render());
             let written = Rinex::from_file(&path).unwrap();
             fs::remove_file(&path).unwrap();
             assert_eq!(written.record.as_obs().unwrap().len(), 20);

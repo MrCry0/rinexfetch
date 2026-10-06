@@ -12,6 +12,7 @@ use rinexfetch::secrets::interactive::InteractiveCredentialProvider;
 use rinexfetch::secrets::keyring::KeyringCredentialProvider;
 use rinexfetch::systems::{self, GnssSystem};
 use rinexfetch::time::GpsDay;
+use rinexfetch::validate::Report;
 
 /// Fetch and combine RINEX data from NASA's CDDIS archive for a given time,
 /// GNSS constellation set, and set of ground stations.
@@ -40,6 +41,11 @@ struct Cli {
 
     #[arg(long, value_enum, default_value_t = CredentialBackend::Interactive)]
     credential_provider: CredentialBackend,
+
+    /// Skip checking the written files against the RINEX layout and their
+    /// source. Validation problems otherwise make the run fail.
+    #[arg(long)]
+    no_validate: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -115,6 +121,11 @@ fn run(cli: Cli) -> Result<(), RinexFetchError> {
         );
     }
 
+    let mut invalid_files = 0usize;
+    if !cli.no_validate {
+        invalid_files += print_validation("Nav", &nav_outcome.validation);
+    }
+
     if !stations.is_empty() {
         println!();
         let outcomes = obs::fetch_and_write_all(
@@ -125,6 +136,12 @@ fn run(cli: Cli) -> Result<(), RinexFetchError> {
             cli.rinex_version,
             &cli.output_dir,
         );
+        if !cli.no_validate {
+            for outcome in &outcomes {
+                invalid_files +=
+                    print_validation(&format!("Obs [{}]", outcome.station), &outcome.validation);
+            }
+        }
         let failed = outcomes.iter().filter(|o| o.result.is_err()).count();
         for outcome in &outcomes {
             match &outcome.result {
@@ -141,7 +158,19 @@ fn run(cli: Cli) -> Result<(), RinexFetchError> {
         }
     }
 
+    if invalid_files > 0 {
+        return Err(RinexFetchError::Validation(invalid_files));
+    }
+
     Ok(())
+}
+
+/// Prints a file's validation issues and returns 1 if it has errors.
+fn print_validation(label: &str, report: &Report) -> usize {
+    for line in report.render() {
+        println!("{label}: validation {line}");
+    }
+    usize::from(report.has_errors())
 }
 
 fn print_summary(
