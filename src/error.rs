@@ -33,4 +33,10 @@ pub enum RinexFetchError {
 
     #[error(transparent)]
     Nav(#[from] NavError),
+
+    #[error(
+        "{0} output file(s) failed validation; the files were kept at the paths shown \
+         above (pass --no-validate to skip this check)"
+    )]
+    Validation(usize),
 }

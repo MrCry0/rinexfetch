@@ -63,7 +63,8 @@ rinexfetch --time latest|<ISO8601> \
            --systems all|gps,glonass,galileo,beidou,qzss,sbas,irnss \
            --stations WTZR00DEU,ONSA00SWE,... \
            --rinex-version 3|4 \
-           --output-dir <path>
+           --output-dir <path> \
+           [--no-validate]
 ```
 
 - `--time` — `latest` resolves to the most recent time for which a usable
@@ -84,6 +85,13 @@ rinexfetch --time latest|<ISO8601> \
   successfully resolved station, all in the requested RINEX version. Each
   source download is integrity-checked via gzip's own CRC32 trailer before
   being considered valid.
+- `--no-validate` — skip the post-write checks. By default every written
+  file is checked and the run exits non-zero if a check fails (the files
+  are kept at the printed paths). Nav files are checked for fixed-width
+  layout and compared record by record with the source file when it has
+  the same RINEX major version (missing, extra or changed records, fields
+  written blank that hold a value in the source, lost header correction
+  lines). Obs files are checked for layout against their own header.
 
 ## Authentication
 

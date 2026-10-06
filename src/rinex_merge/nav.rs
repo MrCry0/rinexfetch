@@ -3,6 +3,7 @@
 //! downloading, decompressing, filtering by requested system, upconverting
 //! to RINEX 4.xx if needed, and writing the result.
 
+use std::fs;
 use std::io::{BufReader, Cursor, Read};
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -18,6 +19,7 @@ use crate::cddis::download::{self, DownloadError};
 use crate::rinex_merge::convert_version;
 use crate::systems::{GnssSystem, matches_constellation};
 use crate::time::GpsDay;
+use crate::validate::{self, Report};
 
 #[derive(Debug, thiserror::Error)]
 pub enum NavError {
@@ -58,6 +60,9 @@ pub struct NavOutcome {
     /// this has not been re-verified against 0.23, so the count is
     /// surfaced here rather than left undetected.
     pub dropped_non_ephemeris: usize,
+    /// Result of checking the written file against the RINEX layout and
+    /// the source it came from.
+    pub validation: Report,
 }
 
 /// Tries each candidate in order, returning the first that downloads and
@@ -106,12 +111,13 @@ pub fn fetch_and_write(
         });
 
         match result {
-            Ok((output_path, dropped_non_ephemeris)) => {
+            Ok((output_path, dropped_non_ephemeris, validation)) => {
                 return Ok(NavOutcome {
                     day: candidate.day,
                     tier: candidate.tier,
                     output_path,
                     dropped_non_ephemeris,
+                    validation,
                 });
             }
             Err(
@@ -139,11 +145,11 @@ fn write_filtered_nav(
     systems: &[GnssSystem],
     target_version_major: u8,
     output_dir: &Path,
-) -> Result<(PathBuf, usize), NavError> {
+) -> Result<(PathBuf, usize, Report), NavError> {
     let mut decompressed = Vec::new();
     GzDecoder::new(gzip_bytes).read_to_end(&mut decompressed)?;
 
-    let mut rinex = Rinex::parse(&mut BufReader::new(Cursor::new(decompressed)))?;
+    let mut rinex = Rinex::parse(&mut BufReader::new(Cursor::new(&decompressed)))?;
 
     let nav = rinex
         .record
@@ -175,7 +181,11 @@ fn write_filtered_nav(
         return Err(err.into());
     }
 
-    Ok((output_path, dropped_non_ephemeris))
+    let source_text = String::from_utf8_lossy(&decompressed);
+    let output_text = fs::read_to_string(&output_path)?;
+    let validation = validate::nav::validate(&source_text, &output_text, systems);
+
+    Ok((output_path, dropped_non_ephemeris, validation))
 }
 
 #[cfg(test)]
@@ -198,7 +208,7 @@ mod tests {
 
         let dir = std::env::temp_dir().join("rinexfetch-nav-indent-test");
         fs::create_dir_all(&dir).unwrap();
-        let (path, _) = write_filtered_nav(&bytes, &[GnssSystem::Gps], 3, &dir).unwrap();
+        let (path, _, _) = write_filtered_nav(&bytes, &[GnssSystem::Gps], 3, &dir).unwrap();
 
         let written = fs::read_to_string(&path).unwrap();
         fs::remove_file(&path).unwrap();
@@ -236,7 +246,7 @@ mod tests {
         let expected = nav.len();
 
         for major in [3u8, 4] {
-            let (path, _) = write_filtered_nav(&bytes, &systems, major, &dir).unwrap();
+            let (path, _, _) = write_filtered_nav(&bytes, &systems, major, &dir).unwrap();
             let written = ephemeris_count(&path);
             fs::remove_file(&path).unwrap();
             assert_eq!(written, expected, "RINEX {major} output lost frames");
@@ -262,7 +272,7 @@ mod tests {
         let expected = source.record.as_nav().unwrap().len();
         assert_eq!(expected, 60);
 
-        let (path, _) = write_filtered_nav(&gzip(RAPID_V4), &systems, 4, &dir).unwrap();
+        let (path, _, _) = write_filtered_nav(&gzip(RAPID_V4), &systems, 4, &dir).unwrap();
         let written = ephemeris_count(&path);
         fs::remove_file(&path).unwrap();
         assert_eq!(written, expected, "RINEX 4 output lost frames");
@@ -274,9 +284,40 @@ mod tests {
         let dir = std::env::temp_dir().join("rinexfetch-nav-rapid-v3-test");
         fs::create_dir_all(&dir).unwrap();
 
-        let (path, _) = write_filtered_nav(&gzip(RAPID_V4), &systems, 3, &dir).unwrap();
+        let (path, _, _) = write_filtered_nav(&gzip(RAPID_V4), &systems, 3, &dir).unwrap();
         let written = ephemeris_count(&path);
         fs::remove_file(&path).unwrap();
         assert!(written > 0, "RINEX 3 output has no frames");
+    }
+
+    fn written_report(source: &str, major: u8) -> Report {
+        let systems = crate::systems::parse_systems("all").unwrap();
+        let dir = std::env::temp_dir().join(format!("rinexfetch-nav-validate-{major}"));
+        fs::create_dir_all(&dir).unwrap();
+        let (path, _, report) = write_filtered_nav(&gzip(source), &systems, major, &dir).unwrap();
+        fs::remove_file(&path).unwrap();
+        report
+    }
+
+    #[test]
+    fn real_source_fixtures_are_well_formed() {
+        for (name, text) in [("multi-gnss v3", MULTI_GNSS), ("rapid v4", RAPID_V4)] {
+            let report = validate::nav::check_structure(text);
+            assert!(!report.has_errors(), "{name}: {:?}", report.render());
+        }
+    }
+
+    #[test]
+    #[ignore = "known rinex 0.23 writer defect: zero fields are written as blanks"]
+    fn written_multi_gnss_fixture_passes_validation_at_rinex_3() {
+        let report = written_report(MULTI_GNSS, 3);
+        assert!(!report.has_errors(), "{:?}", report.render());
+    }
+
+    #[test]
+    #[ignore = "known rinex 0.23 writer defect: zero fields are written as blanks"]
+    fn written_rapid_fixture_passes_validation_at_rinex_4() {
+        let report = written_report(RAPID_V4, 4);
+        assert!(!report.has_errors(), "{:?}", report.render());
     }
 }
