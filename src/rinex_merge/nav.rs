@@ -265,12 +265,10 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
 
         let source = Rinex::parse(&mut BufReader::new(Cursor::new(RAPID_V4))).unwrap();
-        // The fixture holds 64 records but the rinex crate parses 60 of
-        // them: it drops both IRNSS system time offset records and keeps
-        // one of each duplicated C06 CNV1/CNV2 pair. Only what the
-        // parser keeps can be checked here.
+        // The rinex crate parses every record of the fixture, the
+        // duplicated C06 CNV1/CNV2 pairs included.
         let expected = source.record.as_nav().unwrap().len();
-        assert_eq!(expected, 60);
+        assert_eq!(expected, 64);
 
         let (path, _, _) = write_filtered_nav(&gzip(RAPID_V4), &systems, 4, &dir).unwrap();
         let written = ephemeris_count(&path);
@@ -308,14 +306,12 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "known rinex 0.23 writer defect: zero fields are written as blanks"]
     fn written_multi_gnss_fixture_passes_validation_at_rinex_3() {
         let report = written_report(MULTI_GNSS, 3);
         assert!(!report.has_errors(), "{:?}", report.render());
     }
 
     #[test]
-    #[ignore = "known rinex 0.23 writer defect: zero fields are written as blanks"]
     fn written_rapid_fixture_passes_validation_at_rinex_4() {
         let report = written_report(RAPID_V4, 4);
         assert!(!report.has_errors(), "{:?}", report.render());
