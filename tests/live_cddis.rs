@@ -77,6 +77,12 @@ fn real_final_nav_product_downloads_filters_and_upconverts() {
     let outcome = nav::fetch_and_write(&client, &candidates, &ALL_SYSTEMS, 4, &output_dir)
         .expect("fetch_and_write should succeed against a real, settled day");
 
+    assert!(
+        !outcome.validation.has_errors(),
+        "written nav file failed validation: {:?}",
+        outcome.validation.render()
+    );
+
     assert!(outcome.output_path.exists());
 
     // Re-parse our own output to confirm it's valid, and actually RINEX 4
@@ -108,9 +114,49 @@ fn real_final_nav_product_passes_through_at_rinex3() {
     let outcome = nav::fetch_and_write(&client, &candidates, &ALL_SYSTEMS, 3, &output_dir)
         .expect("same-version (3 -> 3) passthrough should always succeed");
 
+    assert!(
+        !outcome.validation.has_errors(),
+        "written nav file failed validation: {:?}",
+        outcome.validation.render()
+    );
+
     let written = rinex::prelude::Rinex::from_file(&outcome.output_path)
         .expect("written output should itself be valid RINEX");
     assert_eq!(written.header.version.major, 3);
+}
+
+#[test]
+#[ignore = "hits the live CDDIS archive; needs RINEXFETCH_TEST_TOKEN"]
+fn real_rapid_nav_passes_through_at_rinex4_for_all_systems() {
+    let token = std::env::var("RINEXFETCH_TEST_TOKEN")
+        .expect("set RINEXFETCH_TEST_TOKEN to a real URS bearer token to run this test");
+    let client = CddisClient::new(token).unwrap();
+
+    // The rapid tier (BRD400DLR) is RINEX 4.02, so --rinex-version 4 is a
+    // same-version passthrough and the written file is compared with the
+    // source record by record: system time offsets (STO), ionosphere (ION)
+    // and EOP frames as well as ephemerides.
+    let day = GpsDay::resolve("2026-08-01").unwrap();
+    let candidates: Vec<_> = discovery::nav_candidates_for_day(day)
+        .into_iter()
+        .filter(|candidate| candidate.tier == NavTier::Rapid)
+        .collect();
+    assert_eq!(candidates.len(), 1);
+
+    let output_dir = TestOutputDir::new("rinexfetch-live-test-nav-rapid-v4-passthrough");
+
+    let outcome = nav::fetch_and_write(&client, &candidates, &ALL_SYSTEMS, 4, &output_dir)
+        .expect("same-version (4 -> 4) passthrough should always succeed");
+
+    assert!(
+        !outcome.validation.has_errors(),
+        "written nav file failed validation: {:?}",
+        outcome.validation.render()
+    );
+
+    let written = rinex::prelude::Rinex::from_file(&outcome.output_path)
+        .expect("written output should itself be valid RINEX");
+    assert_eq!(written.header.version.major, 4);
 }
 
 #[test]
@@ -144,6 +190,12 @@ fn real_rapid_nav_downconverts_gps_ephemeris_to_rinex3() {
     // that the call returned Ok.
     let outcome = nav::fetch_and_write(&client, &candidates, &[GnssSystem::Gps], 3, &output_dir)
         .expect("GPS-only downconversion to RINEX 3 should succeed now");
+
+    assert!(
+        !outcome.validation.has_errors(),
+        "written nav file failed validation: {:?}",
+        outcome.validation.render()
+    );
 
     let written = rinex::prelude::Rinex::from_file(&outcome.output_path)
         .expect("written output should itself be valid RINEX");
@@ -186,6 +238,12 @@ fn real_obs_product_downloads_and_writes_for_known_station() {
         .as_ref()
         .expect("WTZR00DEU should have obs data for a settled day")
         .clone();
+
+    assert!(
+        !outcomes[0].validation.has_errors(),
+        "written obs file failed validation: {:?}",
+        outcomes[0].validation.render()
+    );
 
     let written = rinex::prelude::Rinex::from_file(&output_path)
         .expect("written output should itself be valid RINEX");
@@ -316,6 +374,11 @@ fn real_obs_product_at_rinex3() {
             let written = rinex::prelude::Rinex::from_file(path)
                 .expect("written output should itself be valid RINEX");
             assert_eq!(written.header.version.major, 3);
+            assert!(
+                !outcomes[0].validation.has_errors(),
+                "written obs file failed validation: {:?}",
+                outcomes[0].validation.render()
+            );
         }
         Err(err) => panic!("--rinex-version 3 obs conversion failed: {err}"),
     }

@@ -2047,9 +2047,9 @@ dependencies = [
 
 [[package]]
 name = "rinex"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5eb314e4e4426361eb8102af6661aaf9daf6b0f57d9680bba7577a4f4a8b0340"
+checksum = "0253ae98f3ea5fcecb40cc44c63cb932459520af9c406919d360716b80d8bc6e"
 dependencies = [
  "bitflags",
  "flate2",
