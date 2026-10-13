@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-10-13
+
+### Added
+
+- Written nav and obs files are now checked against the RINEX layout
+  (fixed-width fields, line counts per system and message type, obs
+  epochs against the file's own header). For nav files of the same
+  RINEX version as the source, every record is also compared with the
+  source text. Problems are printed per file and make the run exit
+  non-zero, with the files kept. `--no-validate` skips the check.
+- `irnss` (NavIC) is a selectable system for `--systems` and is
+  included in `all`. Before, IRNSS ephemerides in a combined nav file
+  were filtered out with no way to request them.
+
+### Changed
+
+- Updated the rinex dependency from the fork pin to the published
+  0.24.0 release. The final nav tier now keeps all Galileo records
+  of a day (12041 on 2026-08-01); with the fork pin, records sharing
+  a satellite and epoch were collapsed into one at RINEX 3 and 4. The
+  rapid tier keeps its system time offset, ionosphere and EOP frames
+  when written at RINEX 4.
+- Removed the post-write repair of negative-field indentation in nav
+  output; the rinex crate no longer writes such lines.
+
 ## [1.0.2] - 2026-09-08
 
 ### Fixed
