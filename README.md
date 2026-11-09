@@ -80,7 +80,13 @@ rinexfetch --time latest|<ISO8601> \
   or invalid IDs produce a per-station error and are skipped rather than
   aborting the run.
 - `--rinex-version` — `3` or `4` (default `4`); the requested output
-  version, converting from the source version where needed.
+  version, converting from the source version where needed. RINEX 4 has
+  no `TIME SYSTEM CORR` and `IONOSPHERIC CORR` header lines, so when a
+  RINEX 3 source is written as RINEX 4 they become STO and ION records
+  (no satellite number, dated at the reference time of the line, or at
+  the first ephemeris of the file for ION; the BeiDou models of a header
+  come one per satellite and hour, and each becomes an ION record of its
+  satellite, dated at its hour).
 - `--output-dir` — combined nav file plus, if applicable, one obs file per
   successfully resolved station, all in the requested RINEX version. Each
   source download is integrity-checked via gzip's own CRC32 trailer before

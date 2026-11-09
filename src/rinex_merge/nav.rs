@@ -16,7 +16,7 @@ use rinex::prelude::Rinex;
 use crate::cddis::auth::CddisClient;
 use crate::cddis::discovery::{NavCandidate, NavTier};
 use crate::cddis::download::{self, DownloadError};
-use crate::rinex_merge::convert_version;
+use crate::rinex_merge::{convert_version, corrections};
 use crate::systems::{GnssSystem, matches_constellation};
 use crate::time::GpsDay;
 use crate::validate::{self, Report};
@@ -166,6 +166,13 @@ fn write_filtered_nav(
         .filter(|key| key.frmtype != NavFrameType::Ephemeris)
         .count();
 
+    if rinex.header.version.major < 4 && target_version_major >= 4 {
+        corrections::add_header_corrections(
+            &mut rinex,
+            systems,
+            &String::from_utf8_lossy(&decompressed),
+        );
+    }
     rinex.header = convert_version(rinex.header, target_version_major);
 
     let filename = rinex.standard_filename(false, None, None);
@@ -271,7 +278,174 @@ mod tests {
 
     fn ephemeris_count(path: &Path) -> usize {
         let rinex = Rinex::from_file(path).unwrap();
+        rinex
+            .record
+            .as_nav()
+            .unwrap()
+            .keys()
+            .filter(|key| key.frmtype == NavFrameType::Ephemeris)
+            .count()
+    }
+
+    /// A new directory for each call: tests run in parallel, in threads or,
+    /// with nextest, in processes, and the output file name is the same for
+    /// every test.
+    fn unique_dir(prefix: &str) -> PathBuf {
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "rinexfetch-nav-{prefix}-{}-{call}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn frame_count(path: &Path) -> usize {
+        let rinex = Rinex::from_file(path).unwrap();
         rinex.record.as_nav().unwrap().len()
+    }
+
+    /// The STO and ION frames of the file at `path`: (frame type, system
+    /// letter, time system code of a STO frame).
+    fn correction_frames(path: &Path) -> Vec<(NavFrameType, char, String)> {
+        let rinex = Rinex::from_file(path).unwrap();
+        rinex
+            .record
+            .as_nav()
+            .unwrap()
+            .iter()
+            .filter(|(key, _)| key.frmtype != NavFrameType::Ephemeris)
+            .map(|(key, frame)| {
+                let code = match frame {
+                    rinex::navigation::NavFrame::STO(sto) => {
+                        sto.time_system.clone().unwrap_or_default()
+                    }
+                    _ => String::new(),
+                };
+                let letter = key.sv.to_string().chars().next().unwrap();
+                (key.frmtype, letter, code)
+            })
+            .collect()
+    }
+
+    fn written_path(source: &str, systems: &str, major: u8) -> PathBuf {
+        let systems = crate::systems::parse_systems(systems).unwrap();
+        let dir = unique_dir("corrections");
+        write_filtered_nav(&gzip(source), &systems, major, &dir)
+            .unwrap()
+            .0
+    }
+
+    #[test]
+    fn rinex3_header_corrections_are_written_as_records_at_rinex_4() {
+        let path = written_path(MULTI_GNSS, "all", 4);
+        let frames = correction_frames(&path);
+        let header = fs::read_to_string(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        // one STO frame per TIME SYSTEM CORR line of the source, GLGP included
+        let mut codes: Vec<&str> = frames
+            .iter()
+            .filter(|(kind, ..)| *kind == NavFrameType::SystemTimeOffset)
+            .map(|(_, _, code)| code.as_str())
+            .collect();
+        codes.sort_unstable();
+        assert_eq!(
+            codes,
+            [
+                "BDUT", "GAGP", "GAUT", "GLGP", "GLUT", "GPUT", "IRGA", "IRGL", "IRGP", "IRUT",
+                "QZUT"
+            ]
+        );
+        // and one ION frame per constellation with a model in the header
+        let mut ions: Vec<char> = frames
+            .iter()
+            .filter(|(kind, ..)| *kind == NavFrameType::IonosphereModel)
+            .map(|(_, letter, _)| *letter)
+            .collect();
+        ions.sort_unstable();
+        assert_eq!(ions, ['C', 'E', 'G', 'I', 'J']);
+        assert!(header.contains("> STO R   FDMA"), "{header}");
+        assert!(header.contains("GLGP"));
+    }
+
+    /// The fixture with two BeiDou model lines per satellite and hour added
+    /// to its header, as CDDIS broadcast files have them.
+    fn multi_gnss_with_bds_per_satellite() -> String {
+        let lines = "BDSA   2.7008E-08  9.6858E-08 -1.0729E-06  1.7285E-06 W 02  IONOSPHERIC CORR\n\
+BDSB   1.3926E+05 -7.2090E+05  5.6361E+06 -4.7186E+06 W 02  IONOSPHERIC CORR\n\
+BDSA   3.4459E-08  2.2352E-08 -8.3447E-07  1.4901E-06 M 05  IONOSPHERIC CORR\n\
+BDSB   1.5770E+05 -8.0282E+05  5.0463E+06 -3.9322E+06 M 05  IONOSPHERIC CORR\n";
+        MULTI_GNSS.replacen(
+            "                                                            END OF HEADER",
+            &format!(
+                "{lines}                                                            END OF HEADER"
+            ),
+            1,
+        )
+    }
+
+    #[test]
+    fn beidou_models_per_satellite_become_one_ion_record_each() {
+        let source = multi_gnss_with_bds_per_satellite();
+        let path = written_path(&source, "all", 4);
+        let rinex = Rinex::from_file(&path).unwrap();
+        let report = written_report(&source, 4);
+        fs::remove_file(&path).unwrap();
+
+        let mut models: Vec<(u8, (i32, u8, u8, u8))> = rinex
+            .record
+            .as_nav()
+            .unwrap()
+            .keys()
+            .filter(|key| {
+                key.frmtype == NavFrameType::IonosphereModel
+                    && key.sv.constellation == rinex::prelude::Constellation::BeiDou
+            })
+            .map(|key| {
+                let (y, m, d, h, ..) = key.epoch.to_gregorian(rinex::prelude::TimeScale::BDT);
+                (key.sv.prn, (y, m, d, h))
+            })
+            .collect();
+        models.sort_unstable();
+        // the header line without satellite, then the lines of satellites
+        // 2 (time mark W, 22h) and 5 (M, 12h) of the day of the file
+        assert_eq!(
+            models.iter().map(|(prn, _)| *prn).collect::<Vec<_>>(),
+            [0, 2, 5]
+        );
+        assert_eq!(models[1].1, (2025, 4, 13, 22));
+        assert_eq!(models[2].1, (2025, 4, 13, 12));
+        assert!(!report.has_errors(), "{:?}", report.render());
+    }
+
+    #[test]
+    fn header_corrections_follow_the_requested_systems() {
+        let path = written_path(MULTI_GNSS, "gps", 4);
+        let frames = correction_frames(&path);
+        fs::remove_file(&path).unwrap();
+        let mut kinds: Vec<_> = frames
+            .iter()
+            .map(|(k, l, c)| (*k, *l, c.as_str()))
+            .collect();
+        kinds.sort_by_key(|(_, _, code)| *code);
+        assert_eq!(
+            kinds,
+            [
+                (NavFrameType::IonosphereModel, 'G', ""),
+                (NavFrameType::SystemTimeOffset, 'G', "GPUT"),
+            ]
+        );
+    }
+
+    #[test]
+    fn rinex3_output_keeps_header_corrections_in_the_header() {
+        let path = written_path(MULTI_GNSS, "all", 3);
+        let text = fs::read_to_string(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        assert!(text.contains("GLGP"), "{text}");
+        assert!(!text.contains("> STO"));
     }
 
     #[test]
@@ -312,7 +486,7 @@ mod tests {
         assert_eq!(expected, 64);
 
         let (path, _, _) = write_filtered_nav(&gzip(RAPID_V4), &systems, 4, &dir).unwrap();
-        let written = ephemeris_count(&path);
+        let written = frame_count(&path);
         fs::remove_file(&path).unwrap();
         assert_eq!(written, expected, "RINEX 4 output lost frames");
     }
@@ -331,8 +505,7 @@ mod tests {
 
     fn written_report(source: &str, major: u8) -> Report {
         let systems = crate::systems::parse_systems("all").unwrap();
-        let dir = std::env::temp_dir().join(format!("rinexfetch-nav-validate-{major}"));
-        fs::create_dir_all(&dir).unwrap();
+        let dir = unique_dir("validate");
         let (path, _, report) = write_filtered_nav(&gzip(source), &systems, major, &dir).unwrap();
         fs::remove_file(&path).unwrap();
         report

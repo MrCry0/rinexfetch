@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   trigger a parser panic and cause the station to be skipped. Pin the
   rinex dependency to upstream commit `4871949d06554e0be75fe96b1b045210137e0334`
   until the fix is available in a published release.
+- Writing a RINEX 3 nav product (the final tier) as RINEX 4, the default,
+  dropped every `TIME SYSTEM CORR` and `IONOSPHERIC CORR` header line
+  and wrote nothing in their place, so time offsets such as GLGP were
+  lost. They are now written as STO and ION records, which replace
+  those header lines in RINEX 4.
 
 ## [1.1.0] - 2026-10-13
 
