@@ -486,6 +486,153 @@ fn header_corrections_as_records(src: &Parsed, out: &Parsed, systems: &[GnssSyst
     report
 }
 
+/// Values of the ionosphere model in an ION record, in file order.
+fn ion_values(record: &Record) -> Vec<f64> {
+    let mut written = Vec::new();
+    for (i, line) in record.raw.iter().enumerate() {
+        let (start, count) = if i == 0 {
+            (4 + FIELD_WIDTH, 3)
+        } else {
+            (4, FIELDS_PER_ROW)
+        };
+        for n in 0..count {
+            written.extend(value_at(line, start + n * FIELD_WIDTH));
+        }
+    }
+    written
+}
+
+/// Whether an ION record holds a Klobuchar or NeQuick-G model, the two the
+/// RINEX 3 header can hold (the message type tells them from BDGIM, NavIC
+/// L1NV and the GLONASS CDMA model).
+fn ion_fits_header(record: &Record) -> bool {
+    let msg = record.msg.split_whitespace().next().unwrap_or("");
+    match record.sv.chars().next() {
+        Some('E') => msg == "IFNV",
+        Some('C') => msg == "D1D2",
+        Some('G' | 'J' | 'I') => !matches!(msg, "L1NV" | "LXOC"),
+        _ => false,
+    }
+}
+
+/// The reverse of [`header_corrections_as_records`]: a RINEX 4 `src` written
+/// as RINEX 3 must have its STO and ION records as header lines in `out`.
+/// A header holds one line per code, so a line must match some record of
+/// that code, not every one.
+fn records_as_header_corrections(src: &Parsed, out: &Parsed, systems: &[GnssSystem]) -> Report {
+    let mut report = Report::new();
+    let letters: Vec<char> = systems.iter().map(|s| rinex_code(*s)).collect();
+    // header values are printed with fewer digits than the records
+    let near = |x: f64, y: f64| (x - y).abs() <= 1e-3 * x.abs().max(y.abs());
+    let header_lines = |label: &str| -> Vec<&String> {
+        out.corr_lines
+            .iter()
+            .filter(|l| header_label(l).starts_with(label))
+            .collect()
+    };
+
+    // time system offsets: (code, a0, a1) of every convertible STO record
+    let mut offsets: Vec<(&str, Option<f64>, Option<f64>)> = Vec::new();
+    for record in src.records.iter().filter(|r| r.kind == "STO") {
+        let Some(first) = record.raw.first() else {
+            continue;
+        };
+        let code = slice(first, 24, 28);
+        let sbas = slice(first, 43, 61).trim();
+        let Some(letter) = correction_system(code) else {
+            continue;
+        };
+        if !letters.contains(&letter) || letter == 'S' || !sbas.is_empty() {
+            continue;
+        }
+        let values = record.raw.get(1);
+        offsets.push((
+            code,
+            values.and_then(|l| value_at(l, 4 + FIELD_WIDTH)),
+            values.and_then(|l| value_at(l, 4 + 2 * FIELD_WIDTH)),
+        ));
+    }
+    let mut codes: Vec<&str> = offsets.iter().map(|(code, ..)| *code).collect();
+    codes.sort_unstable();
+    codes.dedup();
+    let lines = header_lines("TIME SYSTEM CORR");
+    for code in codes {
+        let Some(line) = lines.iter().find(|l| slice(l, 0, 4) == code) else {
+            report.error(
+                format!("header {code}"),
+                "STO record has no TIME SYSTEM CORR line in the output",
+            );
+            continue;
+        };
+        let (a0, a1) = header_offset(line);
+        let matches = |x: Option<f64>, y: Option<f64>| near(x.unwrap_or(0.0), y.unwrap_or(0.0));
+        if !offsets
+            .iter()
+            .any(|(c, b0, b1)| *c == code && matches(a0, *b0) && matches(a1, *b1))
+        {
+            report.error(
+                format!("header {code}"),
+                "TIME SYSTEM CORR line matches none of the STO records of that code",
+            );
+        }
+    }
+
+    // ionosphere models: per system letter, the convertible ION records
+    for letter in ['G', 'E', 'C', 'J', 'I'] {
+        if !letters.contains(&letter) {
+            continue;
+        }
+        let models: Vec<Vec<f64>> = src
+            .records
+            .iter()
+            .filter(|r| r.kind == "ION" && r.sv.starts_with(letter) && ion_fits_header(r))
+            .map(ion_values)
+            .collect();
+        if models.is_empty() {
+            continue;
+        }
+        let codes: &[&str] = match letter {
+            'E' => &["GAL"],
+            'G' => &["GPSA", "GPSB"],
+            'C' => &["BDSA", "BDSB"],
+            'J' => &["QZSA", "QZSB"],
+            _ => &["IRNA", "IRNB"],
+        };
+        for code in codes {
+            let Some(line) = out.corr_lines.iter().find(|l| {
+                header_label(l).starts_with("IONOSPHERIC CORR") && slice(l, 0, 4).trim() == *code
+            }) else {
+                report.error(
+                    format!("header {code}"),
+                    "ION record has no IONOSPHERIC CORR line in the output",
+                );
+                continue;
+            };
+            let values: Vec<f64> = (0..4)
+                .filter_map(|i| {
+                    parse_field(slice(line, 5 + 12 * i, 17 + 12 * i))
+                        .ok()
+                        .flatten()
+                })
+                .collect();
+            let offset = if code.ends_with('B') { 4 } else { 0 };
+            let matches = models.iter().any(|written| {
+                values
+                    .iter()
+                    .enumerate()
+                    .all(|(i, v)| written.get(offset + i).is_some_and(|w| near(*v, *w)))
+            });
+            if !matches {
+                report.error(
+                    format!("header {code}"),
+                    "IONOSPHERIC CORR line matches none of the ION records of that system",
+                );
+            }
+        }
+    }
+    report
+}
+
 /// Checks that every record of `systems` in `source` appears in `output`
 /// with the same values, and nothing else was added. Only meaningful when
 /// both files have the same RINEX major version.
@@ -497,6 +644,9 @@ pub fn compare(source: &str, output: &str, systems: &[GnssSystem]) -> Report {
 
     if src.major < 4 && out.major >= 4 {
         report.extend(header_corrections_as_records(&src, &out, systems));
+    }
+    if src.major >= 4 && out.major < 4 {
+        report.extend(records_as_header_corrections(&src, &out, systems));
     }
 
     if src.major != out.major {
@@ -1012,6 +1162,73 @@ GLGP -7.4505805969e-09 0.000000000e+00  86400 2362          TIME SYSTEM CORR
     fn rinex3_header_corrections_of_unrequested_systems_are_not_expected() {
         let galileo = parse_systems("galileo").unwrap();
         let report = corrections_report("", &galileo);
+        assert!(!report.has_errors(), "{:?}", report.render());
+    }
+
+    const V4_CORR_SOURCE: &str =
+        "     4.02           NAVIGATION DATA     M                   RINEX VERSION / TYPE
+                                                            END OF HEADER
+> STO G32 LNAV
+    2026 10 03 19 50 24 GPUT                                  UTC(USNO)
+     3.470340000000E+05 9.313225746155E-10 1.776356839400E-15 0.000000000000E+00
+> STO G18 LNAV
+    2026 10 03 20 50 24 GPUT                                  UTC(USNO)
+     3.605340000000E+05 0.000000000000E+00 8.881784197001E-16 0.000000000000E+00
+> ION G03 LNAV
+    2026 10 01 23 56 24 1.490116119385E-08 7.450580596924E-09-1.192092895508E-07
+    -5.960464477539E-08 1.064960000000E+05 3.276800000000E+04-2.621440000000E+05
+    -6.553600000000E+04
+";
+    const V3_CORR_OUTPUT: &str =
+        "     3.05           NAVIGATION DATA     M                   RINEX VERSION / TYPE
+GPUT  9.3132257462E-10 1.776356840E-15 589824 2438          TIME SYSTEM CORR
+GPSA   1.4901E-08  7.4506E-09 -1.1921E-07 -5.9605E-08       IONOSPHERIC CORR
+GPSB   1.0650E+05  3.2768E+04 -2.6214E+05 -6.5536E+04       IONOSPHERIC CORR
+                                                            END OF HEADER
+";
+
+    fn reverse_report(output: &str, systems: &[GnssSystem]) -> Report {
+        compare(V4_CORR_SOURCE, output, systems)
+    }
+
+    #[test]
+    fn rinex4_records_found_as_rinex3_header_lines_pass() {
+        let report = reverse_report(V3_CORR_OUTPUT, &all());
+        assert!(!report.has_errors(), "{:?}", report.render());
+    }
+
+    #[test]
+    fn rinex4_records_missing_from_the_rinex3_header_are_an_error() {
+        let bare =
+            "     3.05           NAVIGATION DATA     M                   RINEX VERSION / TYPE
+                                                            END OF HEADER
+";
+        let report = reverse_report(bare, &all());
+        let text = report.render().join("\n");
+        assert_eq!(report.error_count(), 3, "{text}");
+        assert!(
+            text.contains("header GPUT") && text.contains("header GPSA"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn rinex3_header_line_matching_no_record_is_an_error() {
+        let changed = V3_CORR_OUTPUT
+            .replace("9.3132257462E-10", "5.0000000000E-10")
+            .replace("1.4901E-08", "1.5901E-08");
+        let report = reverse_report(&changed, &all());
+        assert_eq!(report.error_count(), 2, "{:?}", report.render());
+    }
+
+    #[test]
+    fn rinex4_records_of_unrequested_systems_need_no_header_line() {
+        let galileo = parse_systems("galileo").unwrap();
+        let bare =
+            "     3.05           NAVIGATION DATA     M                   RINEX VERSION / TYPE
+                                                            END OF HEADER
+";
+        let report = reverse_report(bare, &galileo);
         assert!(!report.has_errors(), "{:?}", report.render());
     }
 

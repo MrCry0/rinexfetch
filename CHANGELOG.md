@@ -32,7 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - For a RINEX 3 source written as RINEX 4 the validator checks that each
   `TIME SYSTEM CORR` and `IONOSPHERIC CORR` header line of the source
   has a matching STO or ION record in the output. Before, it only
-  warned that the records were not compared.
+  warned that the records were not compared. The same check runs the
+  other way round, for a RINEX 4 source written as RINEX 3.
 
 ## [1.1.0] - 2026-10-13
 
