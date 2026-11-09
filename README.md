@@ -86,7 +86,10 @@ rinexfetch --time latest|<ISO8601> \
   (no satellite number, dated at the reference time of the line, or at
   the first ephemeris of the file for ION; the BeiDou models of a header
   come one per satellite and hour, and each becomes an ION record of its
-  satellite, dated at its hour).
+  satellite, dated at its hour). The other way round, the first STO
+  record of each time system code and the first Klobuchar or NeQuick-G
+  ION record of each system become header lines of a RINEX 3 file; SBAS
+  offsets and other ionosphere models have no RINEX 3 form.
 - `--output-dir` — combined nav file plus, if applicable, one obs file per
   successfully resolved station, all in the requested RINEX version. Each
   source download is integrity-checked via gzip's own CRC32 trailer before
