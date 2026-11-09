@@ -173,6 +173,9 @@ fn write_filtered_nav(
             &String::from_utf8_lossy(&decompressed),
         );
     }
+    if rinex.header.version.major >= 4 && target_version_major < 4 {
+        corrections::add_header_corrections_from_records(&mut rinex);
+    }
     rinex.header = convert_version(rinex.header, target_version_major);
 
     let filename = rinex.standard_filename(false, None, None);
@@ -437,6 +440,36 @@ BDSB   1.5770E+05 -8.0282E+05  5.0463E+06 -3.9322E+06 M 05  IONOSPHERIC CORR\n";
                 (NavFrameType::SystemTimeOffset, 'G', "GPUT"),
             ]
         );
+    }
+
+    #[test]
+    fn rinex4_records_are_written_as_header_corrections_at_rinex_3() {
+        let path = written_path(RAPID_V4, "all", 3);
+        let text = fs::read_to_string(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        let header: &str = text.split("END OF HEADER").next().unwrap();
+        for code in ["GPUT", "GAGP", "GAUT", "GLUT", "QZUT", "QZGP", "IRGA"] {
+            let line = header
+                .lines()
+                .find(|l| l.starts_with(code) && l.contains("TIME SYSTEM CORR"));
+            assert!(line.is_some(), "no {code} line in the header:\n{header}");
+        }
+        // one line per code, the first record of the code
+        assert_eq!(header.matches("GPUT").count(), 1, "{header}");
+        for model in ["GPSA", "GPSB", "GAL ", "QZSA", "BDSA"] {
+            assert!(
+                header
+                    .lines()
+                    .any(|l| l.starts_with(model) && l.contains("IONOSPHERIC CORR")),
+                "no {model} line in the header:\n{header}"
+            );
+        }
+    }
+
+    #[test]
+    fn rinex4_to_3_header_corrections_pass_validation() {
+        let report = written_report(RAPID_V4, 3);
+        assert!(!report.has_errors(), "{:?}", report.render());
     }
 
     #[test]

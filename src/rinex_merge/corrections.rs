@@ -1,11 +1,12 @@
-//! Header corrections of a RINEX 2/3 navigation file as RINEX 4 records.
+//! Header corrections of a navigation file and RINEX 4 records, both ways.
 //!
 //! RINEX 4 has no `TIME SYSTEM CORR` and `IONOSPHERIC CORR` header lines:
 //! the system time offsets are STO records and the ionosphere models ION
 //! records ("The STO messages replace the previous SYSTEM TIME CORR header
 //! line(s)", RINEX 4.02 section 5.4.9). The rinex crate writes a header
 //! without them when the version changes from 3 to 4, so the corrections
-//! are turned into records here, before the file is written.
+//! are turned into records here, before the file is written. Going from
+//! RINEX 4 to 3, the records are turned back into header lines.
 
 use rinex::navigation::{
     IonosphereModel, KbModel, KbRegionCode, NavFrame, NavFrameType, NavKey, NavMessageType,
@@ -308,6 +309,80 @@ pub(crate) fn add_header_corrections(
         };
         nav.insert(key, NavFrame::ION(model));
         added += 1;
+    }
+    added
+}
+
+/// Seconds into the week and week of `epoch`, as a header correction line
+/// holds them: a continuous GPS week, or a BeiDou week for BeiDou.
+fn header_week(code: &str, epoch: Epoch) -> (u32, u64) {
+    let scale = if code.starts_with("BD") {
+        TimeScale::BDT
+    } else {
+        TimeScale::GPST
+    };
+    epoch.to_time_scale(scale).to_time_of_week()
+}
+
+/// Adds a `TIME SYSTEM CORR` header line for every STO frame code and an
+/// `IONOSPHERIC CORR` model for every constellation of a RINEX 4 file, so
+/// that they are written to the header at RINEX 3. A header holds one line
+/// per code, so the first frame of each code (the earliest) is taken. Not
+/// converted: offsets with an SBAS identifier, and ionosphere models other
+/// than Klobuchar and NeQuick-G, which the RINEX 3 header cannot hold.
+/// Returns the number of header entries added.
+pub(crate) fn add_header_corrections_from_records(rinex: &mut Rinex) -> usize {
+    use rinex::navigation::IonosphereModel;
+
+    let mut offsets: Vec<TimeOffset> = Vec::new();
+    let mut ions: Vec<(Constellation, IonosphereModel)> = Vec::new();
+    if let Some(nav) = rinex.record.as_nav() {
+        for (key, frame) in nav {
+            match frame {
+                NavFrame::STO(sto) => {
+                    let Some(code) = sto.time_system.as_deref() else {
+                        continue;
+                    };
+                    let has_sbas = sto.sbas.as_deref().is_some_and(|id| !id.trim().is_empty());
+                    if broadcaster(code).is_none()
+                        || has_sbas
+                        || offsets
+                            .iter()
+                            .any(|o| o.time_system.as_deref() == Some(code))
+                    {
+                        continue;
+                    }
+                    let (week, nanos) = header_week(code, key.epoch);
+                    let mut offset = TimeOffset::from_time_of_week(
+                        week,
+                        nanos,
+                        sto.lhs,
+                        sto.rhs,
+                        (sto.polynomial.0, sto.polynomial.1, 0.0),
+                    );
+                    offset.time_system = Some(code.to_string());
+                    offsets.push(offset);
+                }
+                NavFrame::ION(model)
+                    if matches!(
+                        model,
+                        IonosphereModel::Klobuchar(_) | IonosphereModel::NequickG(_)
+                    ) && !ions.iter().any(|(c, _)| *c == key.sv.constellation) =>
+                {
+                    ions.push((key.sv.constellation, *model));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let added = offsets.len() + ions.len();
+    let header = rinex.header.nav.get_or_insert_with(Default::default);
+    for offset in offsets {
+        header.add_time_offset(offset);
+    }
+    for (constellation, model) in ions {
+        rinex.header.ionod_corrections.insert(constellation, model);
     }
     added
 }

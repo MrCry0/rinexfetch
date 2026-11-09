@@ -20,7 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   dropped every `TIME SYSTEM CORR` and `IONOSPHERIC CORR` header line
   and wrote nothing in their place, so time offsets such as GLGP were
   lost. They are now written as STO and ION records, which replace
-  those header lines in RINEX 4.
+  those header lines in RINEX 4. The other way round, writing a RINEX 4
+  product (the rapid tier) as RINEX 3 dropped its STO and ION records
+  with no header lines in their place; the first STO record of each
+  time system code and the first Klobuchar or NeQuick-G ION record of
+  each system are now written as `TIME SYSTEM CORR` and
+  `IONOSPHERIC CORR` header lines.
 
 ### Changed
 
