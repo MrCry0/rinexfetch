@@ -1,6 +1,9 @@
 //! RINEX 3.xx/4.xx parsing, system filtering, version conversion, and
 //! writing. Nav and obs are both implemented.
 
+/// Header corrections of RINEX 2/3 nav files as RINEX 4 records.
+mod corrections;
+
 /// Multi-GNSS nav parse, system-filter, convert version, write. Phase 3-4.
 pub mod nav;
 
