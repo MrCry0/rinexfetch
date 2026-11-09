@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Navigation validation explicitly rejects continuation lines with a
   missing prefix column, including rows whose shifted values still
   parse as numbers.
+- Observation files with an incomplete `LEAP SECONDS` header no longer
+  trigger a parser panic and cause the station to be skipped. Pin the
+  rinex dependency to upstream commit `4871949d06554e0be75fe96b1b045210137e0334`
+  until the fix is available in a published release.
 
 ## [1.1.0] - 2026-10-13
 
