@@ -222,6 +222,47 @@ mod tests {
     /// DLR combined nav file.
     const MULTI_GNSS: &str = include_str!("../../tests/fixtures/nav3_dlr_multi_gnss.rnx");
 
+    #[test]
+    fn rinex_304_continuation_fields_start_after_four_prefix_columns() {
+        // First Galileo record of 00CCC_U_20263122330_00U_MN.rnx,
+        // whose continuation rows were written with a three-column prefix.
+        let malformed = include_str!("../../tests/fixtures/nav3_304_short_indent.rnx");
+        assert!(validate::nav::check_structure(malformed).has_errors());
+        // Restore the source columns before parsing: parsing the malformed
+        // rows first would already lose signs or values.
+        let mut body = false;
+        let mut source = String::new();
+        for line in malformed.lines() {
+            if body && line.starts_with(' ') {
+                source.push(' ');
+            }
+            source.push_str(line);
+            source.push('\n');
+            body |= line.contains("END OF HEADER");
+        }
+        let dir = std::env::temp_dir().join("rinexfetch-nav-304-columns-test");
+        fs::create_dir_all(&dir).unwrap();
+        let (path, _, report) =
+            write_filtered_nav(&gzip(&source), &crate::systems::ALL_SYSTEMS, 3, &dir).unwrap();
+        assert!(!report.has_errors(), "{:?}", report.render());
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(written.starts_with("     3.04"));
+        let rows: Vec<_> = written
+            .lines()
+            .skip_while(|line| !line.contains("END OF HEADER"))
+            .skip(2)
+            .collect();
+        assert_eq!(rows.len(), 7);
+        for row in rows {
+            assert_eq!(&row[..4], "    ");
+            assert_eq!(row.len(), 80);
+        }
+        let report = validate::nav::compare(&source, &written, &crate::systems::ALL_SYSTEMS);
+        assert!(!report.has_errors(), "{:?}", report.render());
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
     fn gzip(text: &str) -> Vec<u8> {
         let mut gz = GzEncoder::new(Vec::new(), Compression::default());
         gz.write_all(text.as_bytes()).unwrap();
