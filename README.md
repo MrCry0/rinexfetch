@@ -102,7 +102,8 @@ rinexfetch --time latest|<ISO8601> \
   written blank that hold a value in the source, lost header correction
   lines). A RINEX 3 source written as RINEX 4 is not compared record by
   record, but each of its header time system and ionosphere corrections
-  must appear as a STO or ION record. Obs files are checked for layout
+  must appear as a STO or ION record, and a RINEX 4 source written as
+  RINEX 3 must have its STO and ION records as header lines. Obs files are checked for layout
   against their own header.
 
 ## Authentication

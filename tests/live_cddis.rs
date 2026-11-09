@@ -161,6 +161,41 @@ fn real_rapid_nav_passes_through_at_rinex4_for_all_systems() {
 
 #[test]
 #[ignore = "hits the live CDDIS archive; needs RINEXFETCH_TEST_TOKEN"]
+fn real_rapid_nav_header_corrections_at_rinex3_for_all_systems() {
+    let token = std::env::var("RINEXFETCH_TEST_TOKEN")
+        .expect("set RINEXFETCH_TEST_TOKEN to a real URS bearer token to run this test");
+    let client = CddisClient::new(token).unwrap();
+
+    // The rapid tier is RINEX 4: its STO and ION records must come out as
+    // TIME SYSTEM CORR and IONOSPHERIC CORR header lines at RINEX 3, and
+    // the validator checks each against the records.
+    let day = GpsDay::resolve("2026-08-01").unwrap();
+    let candidates: Vec<_> = discovery::nav_candidates_for_day(day)
+        .into_iter()
+        .filter(|candidate| candidate.tier == NavTier::Rapid)
+        .collect();
+    assert_eq!(candidates.len(), 1);
+
+    let output_dir = TestOutputDir::new("rinexfetch-live-test-nav-rapid-v3-corrections");
+
+    let outcome = nav::fetch_and_write(&client, &candidates, &ALL_SYSTEMS, 3, &output_dir)
+        .expect("4 -> 3 conversion of the rapid tier should succeed for all systems");
+
+    assert!(
+        !outcome.validation.has_errors(),
+        "written nav file failed validation: {:?}",
+        outcome.validation.render()
+    );
+
+    let text = fs::read_to_string(&outcome.output_path).unwrap();
+    let header = text.split("END OF HEADER").next().unwrap();
+    for label in ["TIME SYSTEM CORR", "IONOSPHERIC CORR"] {
+        assert!(header.contains(label), "no {label} line in the header");
+    }
+}
+
+#[test]
+#[ignore = "hits the live CDDIS archive; needs RINEXFETCH_TEST_TOKEN"]
 fn real_rapid_nav_downconverts_gps_ephemeris_to_rinex3() {
     let token = std::env::var("RINEXFETCH_TEST_TOKEN")
         .expect("set RINEXFETCH_TEST_TOKEN to a real URS bearer token to run this test");
