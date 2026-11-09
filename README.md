@@ -97,7 +97,10 @@ rinexfetch --time latest|<ISO8601> \
   layout and compared record by record with the source file when it has
   the same RINEX major version (missing, extra or changed records, fields
   written blank that hold a value in the source, lost header correction
-  lines). Obs files are checked for layout against their own header.
+  lines). A RINEX 3 source written as RINEX 4 is not compared record by
+  record, but each of its header time system and ionosphere corrections
+  must appear as a STO or ION record. Obs files are checked for layout
+  against their own header.
 
 ## Authentication
 

@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   lost. They are now written as STO and ION records, which replace
   those header lines in RINEX 4.
 
+### Changed
+
+- For a RINEX 3 source written as RINEX 4 the validator checks that each
+  `TIME SYSTEM CORR` and `IONOSPHERIC CORR` header line of the source
+  has a matching STO or ION record in the output. Before, it only
+  warned that the records were not compared.
+
 ## [1.1.0] - 2026-10-13
 
 ### Added

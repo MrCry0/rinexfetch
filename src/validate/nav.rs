@@ -27,6 +27,8 @@ struct Record {
     rows: usize,
     /// Non-ephemeris RINEX 4 records are free-form text; kept normalised.
     text: Option<String>,
+    /// The lines of a free-form record as written, blank lines left out.
+    raw: Vec<String>,
 }
 
 impl Record {
@@ -55,6 +57,8 @@ struct Parsed {
     major: u8,
     /// One `<4-letter code> <label>` entry per correction header line.
     corr: Vec<String>,
+    /// The correction header lines themselves, for their values.
+    corr_lines: Vec<String>,
     records: Vec<Record>,
 }
 
@@ -83,6 +87,7 @@ fn parse(text: &str, report: &mut Report) -> Parsed {
     let mut parsed = Parsed {
         major: 0,
         corr: Vec::new(),
+        corr_lines: Vec::new(),
         records: Vec::new(),
     };
     let all: Vec<(usize, &str)> = text.lines().enumerate().map(|(i, l)| (i + 1, l)).collect();
@@ -114,6 +119,7 @@ fn parse(text: &str, report: &mut Report) -> Parsed {
             parsed
                 .corr
                 .push(format!("{} {label}", slice(line, 0, 4).trim()));
+            parsed.corr_lines.push(line.to_string());
         }
         if label == "END OF HEADER" {
             header_done = true;
@@ -151,6 +157,7 @@ fn parse(text: &str, report: &mut Report) -> Parsed {
                     fields: Vec::new(),
                     rows: 0,
                     text: Some(String::new()),
+                    raw: Vec::new(),
                 });
             }
             marker = Some((kind, sv, msg));
@@ -181,14 +188,17 @@ fn parse(text: &str, report: &mut Report) -> Parsed {
                 fields,
                 rows: 1,
                 text: None,
+                raw: Vec::new(),
             });
         } else if let Some(record) = parsed.records.last_mut() {
             if let Some(text) = record.text.as_mut() {
                 if line.trim().is_empty() {
                     // free-form records ignore blank lines
                 } else if record.epoch.is_empty() {
+                    record.raw.push(line.to_string());
                     record.epoch = normalise(line);
                 } else {
+                    record.raw.push(line.to_string());
                     text.push_str(&normalise(line));
                     text.push(' ');
                 }
@@ -346,6 +356,136 @@ fn field_differences(a: &Record, b: &Record, written: &HashSet<(String, usize)>)
         .collect()
 }
 
+/// A numeric value at a fixed position of a free-form record line.
+fn value_at(line: &str, start: usize) -> Option<f64> {
+    parse_field(slice(line, start, start + FIELD_WIDTH))
+        .ok()
+        .flatten()
+}
+
+/// `a0` and `a1` of a `TIME SYSTEM CORR` header line (`A4,1X,D17.10,D16.9`).
+fn header_offset(line: &str) -> (Option<f64>, Option<f64>) {
+    let field = |start, end| parse_field(slice(line, start, end)).ok().flatten();
+    (field(4, 22), field(22, 38))
+}
+
+/// The system letter of the satellite system that broadcasts the header
+/// correction `code` (`GLGP` is broadcast by GLONASS).
+fn correction_system(code: &str) -> Option<char> {
+    match code.get(..2)? {
+        "GP" => Some('G'),
+        "GL" => Some('R'),
+        "GA" | "GAL" => Some('E'),
+        "BD" => Some('C'),
+        "QZ" => Some('J'),
+        "IR" => Some('I'),
+        "SB" => Some('S'),
+        _ => None,
+    }
+}
+
+/// RINEX 4 has no `TIME SYSTEM CORR` and `IONOSPHERIC CORR` header lines:
+/// the values of each such line of a RINEX 3 `src` must be in a STO or ION
+/// record of `out`.
+fn header_corrections_as_records(src: &Parsed, out: &Parsed, systems: &[GnssSystem]) -> Report {
+    let mut report = Report::new();
+    let letters: Vec<char> = systems.iter().map(|s| rinex_code(*s)).collect();
+    let free_form = |kind: &str, letter: char| -> Vec<&Record> {
+        out.records
+            .iter()
+            .filter(|r| r.kind == kind && r.sv.starts_with(letter))
+            .collect()
+    };
+    // `GAL` is the Galileo line of the ionosphere model
+    let ion_letter = |code: &str| match code {
+        "GPSA" | "GPSB" => Some('G'),
+        "GAL" => Some('E'),
+        "BDSA" | "BDSB" => Some('C'),
+        "QZSA" | "QZSB" => Some('J'),
+        "IRNA" | "IRNB" => Some('I'),
+        _ => None,
+    };
+
+    for line in &src.corr_lines {
+        let label = header_label(line);
+        let code = slice(line, 0, 4).trim();
+        if label.starts_with("TIME SYSTEM CORR") {
+            let Some(letter) = correction_system(code) else {
+                continue;
+            };
+            if !letters.contains(&letter) {
+                continue;
+            }
+            if letter == 'S' {
+                report.warning(
+                    format!("header {code}"),
+                    "an SBAS time offset has no STO record without an SBAS identifier",
+                );
+                continue;
+            }
+            let (a0, a1) = header_offset(line);
+            // a STO record: epoch and time system code on the first line,
+            // transmission time, A0, A1, A2 on the second
+            let found = free_form("STO", letter).iter().any(|r| {
+                r.raw.first().is_some_and(|l| slice(l, 24, 28) == code)
+                    && r.raw.get(1).is_some_and(|l| {
+                        let near = |x: Option<f64>, y: Option<f64>| match (x, y) {
+                            (Some(x), Some(y)) => close(x, y),
+                            (x, y) => x.unwrap_or(0.0) == y.unwrap_or(0.0),
+                        };
+                        near(a0, value_at(l, 4 + FIELD_WIDTH))
+                            && near(a1, value_at(l, 4 + 2 * FIELD_WIDTH))
+                    })
+            });
+            if !found {
+                report.error(
+                    format!("header {code}"),
+                    "time system correction has no matching STO record in the output",
+                );
+            }
+        } else if label.starts_with("IONOSPHERIC CORR") {
+            let Some(letter) = ion_letter(code) else {
+                continue;
+            };
+            if !letters.contains(&letter) {
+                continue;
+            }
+            // 4 values of 12 columns after the code; the Galileo line has 3
+            let values: Vec<f64> = (0..4)
+                .filter_map(|i| {
+                    parse_field(slice(line, 5 + 12 * i, 17 + 12 * i))
+                        .ok()
+                        .flatten()
+                })
+                .collect();
+            // an ION record: three values after the epoch, then the rest
+            let found = free_form("ION", letter).iter().any(|r| {
+                let mut written = Vec::new();
+                for (i, l) in r.raw.iter().enumerate() {
+                    let start = if i == 0 { 4 + FIELD_WIDTH } else { 4 };
+                    let count = if i == 0 { 3 } else { FIELDS_PER_ROW };
+                    for n in 0..count {
+                        written.extend(value_at(l, start + n * FIELD_WIDTH));
+                    }
+                }
+                // Klobuchar: alpha 0-3 on the A line, beta 4-7 on the B line
+                let offset = if code.ends_with('B') { 4 } else { 0 };
+                values
+                    .iter()
+                    .enumerate()
+                    .all(|(i, v)| written.get(offset + i).is_some_and(|w| close(*v, *w)))
+            });
+            if !found {
+                report.error(
+                    format!("header {code}"),
+                    "ionospheric correction has no matching ION record in the output",
+                );
+            }
+        }
+    }
+    report
+}
+
 /// Checks that every record of `systems` in `source` appears in `output`
 /// with the same values, and nothing else was added. Only meaningful when
 /// both files have the same RINEX major version.
@@ -354,6 +494,10 @@ pub fn compare(source: &str, output: &str, systems: &[GnssSystem]) -> Report {
     let mut ignored = Report::new();
     let src = parse(source, &mut ignored);
     let out = parse(output, &mut ignored);
+
+    if src.major < 4 && out.major >= 4 {
+        report.extend(header_corrections_as_records(&src, &out, systems));
+    }
 
     if src.major != out.major {
         report.warning(
@@ -805,6 +949,70 @@ GPSA   3.0734e-08  1.4901e-08 -1.7881e-07 -5.9605e-08       IONOSPHERIC CORR
         let source = nav(&written);
         let report = compare(&source, &nav(&blanked), &all());
         assert_eq!(report.error_count(), 1, "{:?}", report.render());
+    }
+
+    const V3_CORR_HEADER: &str =
+        "     3.04           NAVIGATION DATA     M                   RINEX VERSION / TYPE
+GPSA   3.0734e-08  1.4901e-08 -1.7881e-07 -5.9605e-08       IONOSPHERIC CORR
+GPSB   1.3312e+05  3.2768e+04 -2.6214e+05  3.2768e+05       IONOSPHERIC CORR
+GLGP -7.4505805969e-09 0.000000000e+00  86400 2362          TIME SYSTEM CORR
+                                                            END OF HEADER
+";
+    const V4_CORR_RECORDS: &str = "> STO R   FDMA
+    2025 04 14 00 00 00 GLGP
+     8.640000000000E+04-7.450580596900E-09 0.000000000000E+00 0.000000000000E+00
+> ION G   LNAV
+    2025 04 13 00 00 00 3.073400000000E-08 1.490100000000E-08-1.788100000000E-07
+    -5.960500000000E-08 1.331200000000E+05 3.276800000000E+04-2.621400000000E+05
+     3.276800000000E+05 0.000000000000E+00
+";
+
+    fn corrections_report(records: &str, systems: &[GnssSystem]) -> Report {
+        compare(V3_CORR_HEADER, &format!("{V4_HEADER}{records}"), systems)
+    }
+
+    #[test]
+    fn rinex3_header_corrections_found_as_rinex4_records_pass() {
+        let report = corrections_report(V4_CORR_RECORDS, &all());
+        assert!(!report.has_errors(), "{:?}", report.render());
+    }
+
+    #[test]
+    fn rinex3_header_correction_missing_from_rinex4_output_is_an_error() {
+        let report = corrections_report("", &all());
+        let text = report.render().join("\n");
+        assert_eq!(report.error_count(), 3, "{text}");
+        assert!(text.contains("header GLGP"), "{text}");
+        assert!(text.contains("header GPSA"), "{text}");
+        assert!(text.contains("header GPSB"), "{text}");
+    }
+
+    #[test]
+    fn rinex3_header_correction_with_a_changed_value_is_an_error() {
+        let changed = V4_CORR_RECORDS
+            .replace("-7.450580596900E-09", "-7.450580596000E-09")
+            .replace("1.331200000000E+05", "1.331300000000E+05");
+        let report = corrections_report(&changed, &all());
+        assert_eq!(report.error_count(), 2, "{:?}", report.render());
+    }
+
+    #[test]
+    fn rinex3_header_correction_with_a_changed_drift_is_an_error() {
+        // the second coefficient of the line (a1) is compared too
+        let header = V3_CORR_HEADER.replace(
+            "GLGP -7.4505805969e-09 0.000000000e+00",
+            "GLGP -7.4505805969e-09 1.000000000e-14",
+        );
+        let report = compare(&header, &format!("{V4_HEADER}{V4_CORR_RECORDS}"), &all());
+        assert_eq!(report.error_count(), 1, "{:?}", report.render());
+        assert!(report.render()[0].contains("header GLGP"));
+    }
+
+    #[test]
+    fn rinex3_header_corrections_of_unrequested_systems_are_not_expected() {
+        let galileo = parse_systems("galileo").unwrap();
+        let report = corrections_report("", &galileo);
+        assert!(!report.has_errors(), "{:?}", report.render());
     }
 
     #[test]

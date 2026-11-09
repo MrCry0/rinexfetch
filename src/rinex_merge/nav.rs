@@ -526,6 +526,13 @@ BDSB   1.5770E+05 -8.0282E+05  5.0463E+06 -3.9322E+06 M 05  IONOSPHERIC CORR\n";
     }
 
     #[test]
+    fn written_multi_gnss_fixture_passes_validation_at_rinex_4() {
+        // a RINEX 3 source: its header corrections must be in the records
+        let report = written_report(MULTI_GNSS, 4);
+        assert!(!report.has_errors(), "{:?}", report.render());
+    }
+
+    #[test]
     fn written_rapid_fixture_passes_validation_at_rinex_4() {
         let report = written_report(RAPID_V4, 4);
         assert!(!report.has_errors(), "{:?}", report.render());
