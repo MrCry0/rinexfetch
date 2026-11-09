@@ -15,7 +15,8 @@ thiserror = "2.0"
 rpassword = "7.5"
 reqwest = { version = "0.13", features = ["blocking"] }
 keyring = "4.1"
-rinex = "0.24.0"
+# Includes the unreleased LEAP SECONDS header parsing fix (#468).
+rinex = { git = "https://github.com/nav-solutions/rinex", rev = "4871949d06554e0be75fe96b1b045210137e0334" }
 flate2 = "1.1"
 
 [package.metadata.deb]

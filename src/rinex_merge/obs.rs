@@ -243,6 +243,44 @@ mod tests {
     }
 
     #[test]
+    fn obs_with_incomplete_leap_seconds_header_keeps_every_epoch_and_signal() {
+        let source = Rinex::parse(&mut BufReader::new(Cursor::new(WTZR_CRX.as_bytes()))).unwrap();
+        // Header field from REDZ00POL_S_20242240000_01D_30S_MO.rnx,
+        // reported in nav-solutions/rinex#468: the future leap field is missing.
+        let leap_line = format!("{:<60}LEAP SECONDS", "    18  2326     7");
+        let input = WTZR_CRX
+            .lines()
+            .map(|line| {
+                if line
+                    .get(60..)
+                    .is_some_and(|label| label.trim() == "LEAP SECONDS")
+                {
+                    leap_line.as_str()
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(input.contains(&leap_line));
+        let dir = std::env::temp_dir().join("rinexfetch-obs-incomplete-leap-test");
+        fs::create_dir_all(&dir).unwrap();
+
+        for major in [3u8, 4] {
+            let path = write_filtered_obs(input.as_bytes().to_vec(), &ALL_SYSTEMS, major, &dir)
+                .expect("incomplete LEAP SECONDS header must not lose the station");
+            let report = validate_written(&path);
+            assert!(!report.has_errors(), "RINEX {major}: {:?}", report.render());
+            let written = Rinex::from_file(&path).unwrap();
+            fs::remove_file(&path).unwrap();
+            assert_eq!(written.header.leap.unwrap().leap, 18);
+            assert_eq!(written.record.as_obs().unwrap().len(), 20);
+            assert_eq!(signal_count(&written), signal_count(&source));
+        }
+        fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
     fn wtzr_crinex_fixture_keeps_every_epoch_and_signal() {
         let source = Rinex::parse(&mut BufReader::new(Cursor::new(WTZR_CRX.as_bytes()))).unwrap();
         let (src_signals, src_clocks) = signal_count(&source);
