@@ -193,6 +193,22 @@ fn parse(text: &str, report: &mut Report) -> Parsed {
                     text.push(' ');
                 }
             } else {
+                if !line.starts_with("    ") {
+                    report.error(
+                        format!("line {n}"),
+                        "navigation continuation line requires four blank prefix columns",
+                    );
+                }
+                // A missing prefix column can leave every value parseable
+                // when all signs are blank. Check the last nonblank field's
+                // width as well; partial trailing blank spares are harmless.
+                let tail_start = 4 + line.len().saturating_sub(4) / FIELD_WIDTH * FIELD_WIDTH;
+                if !slice(line, tail_start, line.len()).trim().is_empty() {
+                    report.error(
+                        format!("line {n}"),
+                        "continuation fields require 19 columns after four blank prefix columns",
+                    );
+                }
                 for i in 0..FIELDS_PER_ROW {
                     let start = 4 + FIELD_WIDTH * i;
                     push_field(
@@ -545,6 +561,26 @@ mod tests {
             "   -2.192364160156E+04-3.801059722900E-02 ",
         );
         assert!(check_structure(&nav(&shifted)).has_errors());
+    }
+
+    #[test]
+    fn short_prefix_reports_indentation_even_when_the_value_still_parses() {
+        for row in ["   -1.023139648438E+03", "    1.023139648438E+03"] {
+            let shifted = GOOD.replace(
+                "    -1.023139648438E+03 3.573199272156E+00 0.000000000000E+00 0.000000000000E+00",
+                row,
+            );
+            let report = check_structure(&nav(&shifted));
+            assert!(report.has_errors());
+            assert!(
+                report
+                    .issues
+                    .iter()
+                    .any(|issue| issue.message.contains("four blank prefix columns")),
+                "{:?}",
+                report.render()
+            );
+        }
     }
 
     #[test]
