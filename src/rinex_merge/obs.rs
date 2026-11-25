@@ -187,6 +187,8 @@ fn write_filtered_obs(
         obs_header.crinex = None;
     }
 
+    rinex.production = rinex.guess_production_attributes();
+
     let filename = rinex.standard_filename(false, None, None);
     let output_path = output_dir.join(filename);
     rinex.to_file(&output_path)?;
@@ -235,6 +237,9 @@ mod tests {
     /// an epoch boundary so it is itself a valid CRINEX prefix.
     const WTZR_CRX: &str = include_str!("../../tests/fixtures/obs3_wtzr_20epochs.crx");
 
+    /// CRINEX V3 to RINEX V3
+    const WTZR_EXPECTED_NAME: &str = "WTZR00XXX_R_20262740000_15M_30S_MO.rnx";
+
     fn signal_count(rinex: &Rinex) -> (usize, usize) {
         let obs = rinex.record.as_obs().unwrap();
         let signals = obs.values().map(|o| o.signals.len()).sum();
@@ -269,6 +274,9 @@ mod tests {
         for major in [3u8, 4] {
             let path = write_filtered_obs(input.as_bytes().to_vec(), &ALL_SYSTEMS, major, &dir)
                 .expect("incomplete LEAP SECONDS header must not lose the station");
+
+            assert_eq!(path.file_name().unwrap(), WTZR_EXPECTED_NAME, "invalid filename");
+
             let report = validate_written(&path);
             assert!(!report.has_errors(), "RINEX {major}: {:?}", report.render());
             let written = Rinex::from_file(&path).unwrap();
@@ -293,6 +301,9 @@ mod tests {
         for major in [3u8, 4] {
             let path =
                 write_filtered_obs(WTZR_CRX.as_bytes().to_vec(), &systems, major, &dir).unwrap();
+
+            assert_eq!(path.file_name().unwrap(), WTZR_EXPECTED_NAME, "invalid filename");
+
             let report = validate_written(&path);
             assert!(!report.has_errors(), "RINEX {major}: {:?}", report.render());
             let written = Rinex::from_file(&path).unwrap();
